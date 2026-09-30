@@ -93,6 +93,7 @@ erDiagram
 | email | VARCHAR(320) | UNIQUE, NOT NULL | Email đăng nhập, lưu lowercase |
 | password_hash | VARCHAR(255) | NOT NULL | Argon2/bcrypt hash |
 | display_name | VARCHAR(100) | NOT NULL | Tên hiển thị |
+| role | VARCHAR(20) | NOT NULL, default `user`, CHECK | Role hệ thống: `admin` hoặc `user` |
 | avatar_url | TEXT | NULL | URL avatar tùy chọn |
 | quota_bytes | BIGINT | NOT NULL, `> 0` | Tổng dung lượng được phép |
 | used_storage_bytes | BIGINT | NOT NULL, `>= 0` | Dung lượng đang dùng |

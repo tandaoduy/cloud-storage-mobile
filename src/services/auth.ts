@@ -5,7 +5,7 @@ import { apiFetch } from '@/services/api';
 const SESSION_KEY = 'cloud_storage_session';
 const LEGACY_SESSION_KEY = 'cloudbox_session';
 
-type User = { id: string; email: string; display_name: string };
+export type User = { id: string; email: string; display_name: string; role: 'admin' | 'user'; is_active: boolean };
 export type Session = { access_token: string; refresh_token: string; expires_in: number; user: User };
 
 type AuthResponse = { data: Session };
@@ -41,6 +41,19 @@ export async function getSession(): Promise<Session | null> {
 export async function clearSession() {
   await SecureStore.deleteItemAsync(SESSION_KEY);
   await SecureStore.deleteItemAsync(LEGACY_SESSION_KEY);
+}
+
+/** Refreshes an expired access token while preserving the user's session. */
+export async function refreshSession(): Promise<Session> {
+  const session = await getSession();
+  if (!session?.refresh_token) throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+  const response = await apiFetch<AuthResponse>('/auth/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: session.refresh_token }),
+  });
+  await saveSession(response.data);
+  return response.data;
 }
 
 export async function logout(): Promise<void> {

@@ -15,7 +15,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def serialize_user(user: User) -> dict[str, str]:
-    return {"id": str(user.id), "email": user.email, "display_name": user.display_name}
+    return {"id": str(user.id), "email": user.email, "display_name": user.display_name, "role": user.role, "is_active": user.is_active}
 
 
 async def issue_token_pair(user: User, db: AsyncSession) -> dict:
@@ -23,7 +23,7 @@ async def issue_token_pair(user: User, db: AsyncSession) -> dict:
     refresh_token = create_refresh_token()
     db.add(RefreshToken(user_id=user.id, token_hash=hash_refresh_token(refresh_token), expires_at=datetime.now(UTC) + timedelta(days=settings.refresh_token_expire_days)))
     await db.commit()
-    return {"data": {"access_token": create_access_token(str(user.id)), "refresh_token": refresh_token, "token_type": "bearer", "expires_in": settings.access_token_expire_minutes * 60, "user": serialize_user(user)}}
+    return {"data": {"access_token": create_access_token(str(user.id), user.role), "refresh_token": refresh_token, "token_type": "bearer", "expires_in": settings.access_token_expire_minutes * 60, "user": serialize_user(user)}}
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
@@ -42,6 +42,8 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> di
     user = await db.scalar(select(User).where(User.email == str(payload.email).lower()))
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email hoặc mật khẩu không đúng.")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tài khoản đã bị khoá tạm thời.")
     return await issue_token_pair(user, db)
 
 
@@ -50,6 +52,8 @@ async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)) -
     token = await db.scalar(select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(payload.refresh_token)))
     if not token or token.revoked_at or token.expires_at <= datetime.now(UTC):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token không hợp lệ.")
+    if not token.user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tài khoản đã bị khoá tạm thời.")
     token.revoked_at = datetime.now(UTC)
     await db.flush()
     return await issue_token_pair(token.user, db)

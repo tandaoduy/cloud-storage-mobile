@@ -90,7 +90,7 @@ Tạo tài khoản mới.
     "refresh_token": "opaque-or-jwt-token",
     "token_type": "bearer",
     "expires_in": 900,
-    "user": { "id": "uuid", "email": "mai@example.com", "display_name": "Mai" }
+    "user": { "id": "uuid", "email": "mai@example.com", "display_name": "Mai", "role": "user" }
   }
 }
 ```
@@ -114,6 +114,8 @@ Thu hồi refresh token hiện hành.
 Response: `204 No Content`.
 
 ## 4. Profile và quota
+
+`role` trong response/JWT chỉ nhận `user` hoặc `admin`. Client có thể dùng role để hiển thị UI phù hợp, nhưng backend luôn phải kiểm tra role lại trước các API quản trị.
 
 ### `GET /me`
 

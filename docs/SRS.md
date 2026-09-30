@@ -27,11 +27,12 @@ Tài liệu này là cơ sở để thiết kế UI, API, cơ sở dữ liệu, 
 
 ## 3. Người dùng và vai trò
 
-| Vai trò | Mô tả | Quyền chính |
-| --- | --- | --- |
-| Người dùng | Chủ sở hữu không gian lưu trữ | Quản lý nội dung của mình, chia sẻ nội dung |
-| Người được chia sẻ | Người nhận quyền từ chủ sở hữu | Xem hoặc chỉnh sửa trong phạm vi được cấp |
-| Quản trị viên | Vai trò vận hành hệ thống (giai đoạn sau) | Quản lý người dùng, quota và sự cố |
+| Vai trò | Mã role | Mô tả | Quyền chính |
+| --- | --- | --- | --- |
+| Người dùng | `user` | Role mặc định khi đăng ký | Quản lý nội dung sở hữu; xem/chỉnh sửa nội dung được chia sẻ theo quyền `viewer`/`editor` |
+| Quản trị viên | `admin` | Role vận hành hệ thống | Toàn bộ quyền `user`, quản lý tài khoản, điều chỉnh quota, xem audit log và xử lý tài khoản vi phạm |
+
+Chỉ có hai role cấp hệ thống: `admin` và `user`. `viewer`/`editor` là quyền chia sẻ trên từng file/thư mục, không phải role hệ thống. API đăng ký luôn tạo `user`; chỉ admin hoặc migration/seed vận hành mới được gán `admin`.
 
 ## 4. Kiến trúc và công nghệ
 
@@ -51,7 +52,18 @@ FastAPI (REST API, JWT, phân quyền)
 - API: FastAPI, Pydantic, SQLAlchemy async, Alembic migration.
 - Database: PostgreSQL.
 - Storage: S3-compatible object storage. PostgreSQL không lưu binary của file.
-- Local development: Docker Compose chạy API và PostgreSQL; có thể thêm MinIO khi triển khai upload.
+- Local development: Docker Compose chạy API, PostgreSQL và MinIO. MinIO là object storage local bắt buộc khi triển khai upload.
+
+### 4.1 Quy định nơi lưu trữ tệp
+
+| Loại dữ liệu | Local development | Production | Ghi chú |
+| --- | --- | --- | --- |
+| Nội dung nhị phân (PDF, ảnh, video...) | MinIO chạy bằng Docker | Amazon S3, Cloudflare R2 hoặc dịch vụ S3-compatible | Đây là nơi lưu file gốc. Backend chỉ cấp signed URL để mobile upload/download trực tiếp. |
+| Metadata file/folder, account, quyền share, quota | PostgreSQL Docker | PostgreSQL managed hoặc self-hosted | Chỉ lưu tên, MIME type, kích thước, `storage_key`, owner, quyền và trạng thái. **Không lưu binary file trong PostgreSQL.** |
+| Token đăng nhập trên điện thoại | Expo SecureStore | Expo SecureStore | Lưu session đã mã hóa; không lưu password. |
+| File tải xuống/cache trên điện thoại | Cache/sandbox của ứng dụng | Cache/sandbox của ứng dụng | Là bản tạm, có thể bị hệ điều hành xoá; không phải bản file gốc. |
+
+Luồng upload: mobile yêu cầu upload intent từ FastAPI → FastAPI kiểm tra JWT, quyền và quota → FastAPI cấp signed upload URL → mobile gửi binary trực tiếp đến MinIO/S3/R2 → mobile báo hoàn tất → FastAPI ghi metadata vào PostgreSQL và cập nhật quota. Nhờ vậy FastAPI không phải truyền file lớn qua server, còn PostgreSQL nhỏ gọn và dễ backup.
 
 ## 5. Yêu cầu chức năng
 
@@ -131,14 +143,14 @@ API phản hồi JSON theo dạng `{ "data": ..., "meta": ... }`; lỗi theo d�
 
 | Bảng | Trường quan trọng |
 | --- | --- |
-| `users` | id, email, password_hash, display_name, quota_bytes, used_storage_bytes, created_at |
+| `users` | id, email, password_hash, display_name, role, quota_bytes, used_storage_bytes, created_at |
 | `folders` | id, owner_id, parent_id, name, is_deleted, created_at, updated_at |
 | `files` | id, owner_id, folder_id, name, mime_type, size_bytes, storage_key, is_starred, is_deleted, created_at, updated_at |
 | `shares` | id, resource_type, resource_id, recipient_id, permission, created_by, created_at |
 | `refresh_tokens` | id, user_id, token_hash, expires_at, revoked_at |
 | `activity_logs` | id, actor_id, action, resource_type, resource_id, created_at |
 
-Ràng buộc quan trọng: email là duy nhất; `parent_id` tham chiếu `folders`; tệp chỉ có một chủ sở hữu; `storage_key` là duy nhất; `permission` chỉ nhận `viewer` hoặc `editor`.
+Ràng buộc quan trọng: email là duy nhất; `users.role` chỉ nhận `admin` hoặc `user`; `parent_id` tham chiếu `folders`; tệp chỉ có một chủ sở hữu; `storage_key` là duy nhất; `permission` chỉ nhận `viewer` hoặc `editor`.
 
 ## 9. Yêu cầu phi chức năng
 

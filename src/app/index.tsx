@@ -144,6 +144,12 @@ export default function HomeScreen() {
     void checkSession();
   }, [checkSession]);
 
+  useEffect(() => {
+    if (session?.user.role === 'admin') {
+      router.replace('/admin');
+    }
+  }, [session]);
+
   const switchMode = (toRegister: boolean) => {
     setIsRegister(toRegister);
     setErrors({});
@@ -341,15 +347,15 @@ export default function HomeScreen() {
               </View>
 
               <Pressable
-                onPress={() => router.push('/explore')}
+                onPress={() => router.push(session.user.role === 'admin' ? '/admin' : '/explore')}
                 style={styles.submitButton}>
                 <LinearGradient
                   colors={['#2563EB', '#1D4ED8']}
                   style={styles.gradientButton}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}>
-                  <Ionicons name="folder-open-outline" size={18} color="#FFFFFF" />
-                  <Text style={styles.submitButtonText}>{t.exploreFiles}</Text>
+                  <Ionicons name={session.user.role === 'admin' ? 'shield-checkmark-outline' : 'folder-open-outline'} size={18} color="#FFFFFF" />
+                  <Text style={styles.submitButtonText}>{session.user.role === 'admin' ? 'Quản trị hệ thống' : t.exploreFiles}</Text>
                 </LinearGradient>
               </Pressable>
 
