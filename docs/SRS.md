@@ -1,8 +1,8 @@
-# Software Requirements Specification (SRS) — CloudBox
+# Software Requirements Specification (SRS) — Cloud Storage
 
 ## 1. Mục đích
 
-CloudBox là ứng dụng lưu trữ đám mây trên thiết bị di động, lấy cảm hứng từ Google Drive. Người dùng có thể quản lý thư mục và tệp cá nhân, theo dõi dung lượng, tìm kiếm và chia sẻ nội dung theo quyền được cấp.
+Cloud Storage là ứng dụng lưu trữ đám mây trên thiết bị di động, lấy cảm hứng từ Google Drive. Người dùng có thể quản lý thư mục và tệp cá nhân, theo dõi dung lượng, tìm kiếm và chia sẻ nội dung theo quyền được cấp.
 
 Tài liệu này là cơ sở để thiết kế UI, API, cơ sở dữ liệu, kiểm thử và triển khai sản phẩm.
 

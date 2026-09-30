@@ -1,1 +1,1 @@
-"""CloudBox FastAPI application."""
+"""Cloud Storage FastAPI application."""

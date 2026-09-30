@@ -1,4 +1,4 @@
-# Thiết kế Database — CloudBox
+# Thiết kế Database — Cloud Storage
 
 ## 1. Nguyên tắc
 

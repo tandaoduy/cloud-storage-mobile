@@ -1,4 +1,4 @@
-# API Specification — CloudBox
+# API Specification — Cloud Storage
 
 Base URL local: `http://127.0.0.1:8000/api/v1`  
 Content type: `application/json`, trừ upload binary/multipart.

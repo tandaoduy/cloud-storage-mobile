@@ -1,4 +1,4 @@
-# Sơ đồ hệ thống CloudBox
+# Sơ đồ hệ thống Cloud Storage
 
 ## 1. Use case diagram
 
@@ -8,7 +8,7 @@ flowchart LR
     recipient([Người được chia sẻ])
     admin([Quản trị viên])
 
-    subgraph cloudbox[CloudBox]
+    subgraph cloud_storage[Cloud Storage]
       auth((Đăng ký / Đăng nhập))
       browse((Duyệt file & thư mục))
       folder((Quản lý thư mục))
