@@ -139,6 +139,8 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
+    // Session is read once from encrypted device storage when the app starts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void checkSession();
   }, [checkSession]);
 
