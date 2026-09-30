@@ -1,0 +1,1 @@
+"""CloudBox FastAPI application."""
