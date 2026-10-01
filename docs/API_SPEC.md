@@ -132,11 +132,45 @@ Response: `204 No Content`.
 
 ### `PATCH /me`
 
-Chỉ sửa trường được gửi.
+Chỉ sửa trường được gửi. Yêu cầu access token.
 
 ```json
-{ "display_name": "Mai Nguyen", "avatar_url": "https://..." }
+{ "display_name": "Mai Nguyen" }
 ```
+
+### `PUT /me/avatar`
+
+Cập nhật ảnh đại diện. Yêu cầu access token. Gửi `multipart/form-data` với trường `file`.
+
+- Chỉ nhận `image/jpeg`, `image/png`, `image/webp`.
+- Kích thước tối đa: 5 MB.
+- Ảnh cũ của chính người dùng được thay thế; response trả `User` có `avatar_url` tuyệt đối.
+
+**Response 200**
+
+```json
+{ "data": { "id": "uuid", "display_name": "Mai", "avatar_url": "http://localhost:8000/uploads/avatars/uuid.jpg" } }
+```
+
+### `DELETE /me/avatar`
+
+Xóa ảnh đại diện hiện tại. Yêu cầu access token. Response `200` với `avatar_url: null`.
+
+### `PATCH /me/password`
+
+Đổi mật khẩu của tài khoản hiện tại. Yêu cầu access token.
+
+```json
+{ "current_password": "old-password", "new_password": "new-strong-password" }
+```
+
+`new_password` dài từ 8 đến 128 ký tự và phải khác mật khẩu cũ. Nếu thành công, backend thu hồi mọi refresh token hiện có, tạo token pair mới cho phiên đang đổi mật khẩu và trả `200 TokenPair`. Các thiết bị/phiên khác phải đăng nhập lại.
+
+| Trạng thái | Trường hợp |
+| --- | --- |
+| 400 | Mật khẩu hiện tại không đúng |
+| 401 | Thiếu hoặc hết hạn access token |
+| 422 | Mật khẩu mới ngắn, không hợp lệ hoặc trùng mật khẩu cũ |
 
 ### `GET /me/storage`
 
@@ -146,55 +180,34 @@ Chỉ sửa trường được gửi.
 
 ## 5. Folders
 
+Các API thư mục hiện yêu cầu access token và chỉ thao tác trên thư mục của tài khoản hiện tại.
+
 ### `GET /folders`
 
-Liệt kê thư mục con của `parent_id`; `parent_id` không có nghĩa là root. Không trả mục đã xoá.
+Liệt kê thư mục của tài khoản hiện tại, sắp xếp thư mục cập nhật gần nhất lên đầu.
 
-Query: `parent_id`, `limit`, `cursor`, `sort_by`, `sort_order`.
+**Response 200**
+
+```json
+{ "data": [{ "id": "uuid", "name": "Ảnh du lịch", "created_at": "2026-10-01T00:00:00+00:00", "updated_at": "2026-10-01T00:00:00+00:00" }] }
+```
 
 ### `POST /folders`
 
 ```json
-{ "name": "Ảnh du lịch", "parent_id": "uuid-or-null" }
+{ "name": "Ảnh du lịch" }
 ```
 
 **Response 201**
 
 ```json
-{ "data": { "id": "uuid", "name": "Ảnh du lịch", "parent_id": null, "owner_id": "uuid", "created_at": "2026-09-30T00:00:00Z" } }
+{ "data": { "id": "uuid", "name": "Ảnh du lịch", "created_at": "2026-10-01T00:00:00+00:00", "updated_at": "2026-10-01T00:00:00+00:00" } }
 ```
 
-### `GET /folders/{folder_id}`
-
-Trả metadata thư mục sau khi kiểm tra owner/share permission.
-
-### `PATCH /folders/{folder_id}`
-
-Đổi tên hoặc di chuyển thư mục. Người gọi cần là owner hoặc editor.
-
-```json
-{ "name": "Ảnh 2026", "parent_id": "uuid-or-null" }
-```
-
-Không được di chuyển vào chính nó hay con cháu của nó.
 
 ### `DELETE /folders/{folder_id}`
 
-Xoá mềm; response `204`. Có thể dùng query `recursive=true` để cho phép xoá thư mục có nội dung, nếu UI đã xác nhận.
-
-### `GET /folders/{folder_id}/contents`
-
-Trả danh sách kết hợp folders và files trong thư mục.
-
-```json
-{
-  "data": [
-    { "kind": "folder", "id": "uuid", "name": "Thiết kế", "updated_at": "..." },
-    { "kind": "file", "id": "uuid", "name": "brief.pdf", "mime_type": "application/pdf", "size_bytes": 24000, "updated_at": "..." }
-  ],
-  "meta": { "next_cursor": null, "limit": 20 }
-}
-```
+Xóa vĩnh viễn thư mục của tài khoản hiện tại. Response `204 No Content`; trả `404` nếu thư mục không tồn tại hoặc không thuộc tài khoản.
 
 ## 6. Files
 

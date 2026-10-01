@@ -18,8 +18,10 @@ import { router } from 'expo-router';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getSession, login, logout, register, Session } from '@/services/auth';
+import { UserDashboard } from '@/components/UserDashboard';
 
 type Language = 'vi' | 'en';
+
 
 type FormErrors = {
   displayName?: string;
@@ -236,17 +238,20 @@ export default function HomeScreen() {
     ]);
   };
 
-  // Harmonious theme colors
-  const bgMain = isDark ? '#0A0E17' : '#F6F8FC';
-  const cardBg = isDark ? '#131B2A' : '#FFFFFF';
-  const cardBorder = isDark ? '#1E293B' : '#E5E9F0';
-  const inputBg = isDark ? '#0D1424' : '#F9FAFB';
-  const inputBorder = isDark ? '#263347' : '#D1D5DB';
-  const inputBorderFocus = '#2563EB';
+  // Harmonious theme colors with system blue overlay
+  const bgMain = isDark ? '#0A1326' : '#F6F8FC';
+  const bgGradientColors: readonly [string, string, ...string[]] = isDark
+    ? ['#0A152A', '#0E2246', '#0A1733', '#060B16']
+    : ['#EEF6FF', '#E0F0FE', '#F1F6FD', '#F8FAFC'];
+  const cardBg = isDark ? 'rgba(15, 26, 48, 0.88)' : '#FFFFFF';
+  const cardBorder = isDark ? 'rgba(59, 130, 246, 0.24)' : 'rgba(219, 234, 254, 0.9)';
+  const inputBg = isDark ? 'rgba(10, 18, 34, 0.85)' : '#F8FAFC';
+  const inputBorder = isDark ? 'rgba(59, 130, 246, 0.22)' : '#D1D5DB';
+  const inputBorderFocus = '#3B82F6';
   const inputBorderError = '#EF4444';
   const textColor = isDark ? '#F8FAFC' : '#0F172A';
   const textMuted = isDark ? '#94A3B8' : '#64748B';
-  const labelColor = isDark ? '#E2E8F0' : '#334155';
+  const labelColor = isDark ? '#CBD5E1' : '#334155';
 
   if (isLoadingSession) {
     return (
@@ -256,127 +261,63 @@ export default function HomeScreen() {
     );
   }
 
-  // Logged-in profile view
+  // Logged-in user dashboard
   if (session) {
-    const initials = session.user.display_name
-      ? session.user.display_name
-          .split(' ')
-          .map((n) => n[0])
-          .slice(-2)
-          .join('')
-          .toUpperCase()
-      : 'CS';
-
     return (
-      <View style={[styles.container, { backgroundColor: bgMain }]}>
-        <SafeAreaView style={styles.safeArea}>
-          {/* Top Bar with Language Selector */}
-          <View style={styles.topBar}>
-            <View style={[styles.langToggle, { backgroundColor: isDark ? '#131B2A' : '#EAEFF5', borderColor: cardBorder }]}>
-              <Pressable
-                onPress={() => setLanguage('vi')}
-                style={[styles.langBtn, language === 'vi' && [styles.langBtnActive, { backgroundColor: isDark ? '#222F46' : '#FFFFFF' }]]}>
-                <Text style={styles.flagIcon}>🇻🇳</Text>
-                <Text style={[styles.langText, { color: textColor }, language === 'vi' && styles.langTextActive]}>VI</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setLanguage('en')}
-                style={[styles.langBtn, language === 'en' && [styles.langBtnActive, { backgroundColor: isDark ? '#222F46' : '#FFFFFF' }]]}>
-                <Text style={styles.flagIcon}>🇬🇧</Text>
-                <Text style={[styles.langText, { color: textColor }, language === 'en' && styles.langTextActive]}>EN</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          <ScrollView
-            contentContainerStyle={[
-              styles.scrollContent,
-              { flexGrow: 1, justifyContent: 'center', paddingBottom: insets.bottom + 24 },
-            ]}
-            showsVerticalScrollIndicator={false}>
-            {/* Logo & Brand Header */}
-            <View style={styles.brandHeader}>
-              <View style={styles.logoContainer}>
-                <View style={styles.logoAmbientGlow} />
-                <LinearGradient
-                  colors={['#38BDF8', '#2563EB', '#1D4ED8']}
-                  style={styles.logoBadge}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}>
-                  <Ionicons name="cloud" size={40} color="#FFFFFF" />
-                  <View style={styles.uploadBadge}>
-                    <Ionicons name="checkmark" size={11} color="#2563EB" />
-                  </View>
-                </LinearGradient>
-              </View>
-              <Text style={[styles.brandTitle, { color: textColor }]}>{t.brandTitle}</Text>
-            </View>
-
-            {/* Account Card */}
-            <View
-              style={[
-                styles.card,
-                { backgroundColor: cardBg, borderColor: cardBorder },
-              ]}>
-              <View style={styles.userHeader}>
-                <LinearGradient
-                  colors={['#3B82F6', '#1D4ED8']}
-                  style={styles.avatar}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}>
-                  <Text style={styles.avatarText}>{initials}</Text>
-                </LinearGradient>
-                <View style={styles.userInfo}>
-                  <Text style={[styles.userName, { color: textColor }]}>
-                    {session.user.display_name}
-                  </Text>
-                  <Text style={[styles.userEmail, { color: textMuted }]}>
-                    {session.user.email}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={[styles.quotaBox, { backgroundColor: inputBg, borderColor: inputBorder }]}>
-                <View style={styles.quotaHeader}>
-                  <Text style={[styles.quotaLabel, { color: textMuted }]}>{t.storageUsed}</Text>
-                  <Text style={styles.quotaValue}>0 B / 15 GB</Text>
-                </View>
-                <View style={styles.progressBarBg}>
-                  <View style={[styles.progressBarFill, { width: '5%' }]} />
-                </View>
-              </View>
-
-              <Pressable
-                onPress={() => router.push(session.user.role === 'admin' ? '/admin' : '/explore')}
-                style={styles.submitButton}>
-                <LinearGradient
-                  colors={['#2563EB', '#1D4ED8']}
-                  style={styles.gradientButton}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}>
-                  <Ionicons name={session.user.role === 'admin' ? 'shield-checkmark-outline' : 'folder-open-outline'} size={18} color="#FFFFFF" />
-                  <Text style={styles.submitButtonText}>{session.user.role === 'admin' ? 'Quản trị hệ thống' : t.exploreFiles}</Text>
-                </LinearGradient>
-              </Pressable>
-
-              <Pressable
-                onPress={handleLogout}
-                style={[styles.logoutButton, { borderColor: isDark ? '#EF4444' : '#DC2626' }]}>
-                <Ionicons name="log-out-outline" size={18} color={isDark ? '#F87171' : '#DC2626'} />
-                <Text style={[styles.logoutButtonText, { color: isDark ? '#F87171' : '#DC2626' }]}>
-                  {t.logout}
-                </Text>
-              </Pressable>
-            </View>
-          </ScrollView>
-        </SafeAreaView>
-      </View>
+      <SafeAreaView style={[styles.dashboardSafeArea, { backgroundColor: bgMain }]} edges={['top', 'left', 'right']}>
+        <UserDashboard
+          session={session}
+          language={language}
+          setLanguage={setLanguage}
+          onLogout={handleLogout}
+        />
+      </SafeAreaView>
     );
   }
 
+
+
   // Unified Single-Frame Login / Register View
   return (
-    <View style={[styles.container, { backgroundColor: bgMain }]}>
+    <LinearGradient
+      colors={bgGradientColors}
+      locations={isDark ? [0, 0.35, 0.7, 1] : [0, 0.3, 0.7, 1]}
+      start={{ x: 0.1, y: 0 }}
+      end={{ x: 0.9, y: 1 }}
+      style={styles.container}>
+      {/* Decorative ambient glowing lights for depth */}
+      <View style={styles.ambientBackgroundContainer} pointerEvents="none">
+        <LinearGradient
+          colors={
+            isDark
+              ? ['rgba(37, 99, 235, 0.28)', 'rgba(30, 64, 175, 0.05)', 'transparent']
+              : ['rgba(56, 189, 248, 0.25)', 'rgba(37, 99, 235, 0.06)', 'transparent']
+          }
+          style={styles.ambientOrbTop}
+          start={{ x: 0.5, y: 0.5 }}
+          end={{ x: 1, y: 1 }}
+        />
+        <LinearGradient
+          colors={
+            isDark
+              ? ['rgba(14, 165, 233, 0.2)', 'rgba(37, 99, 235, 0.04)', 'transparent']
+              : ['rgba(96, 165, 250, 0.2)', 'rgba(147, 197, 253, 0.05)', 'transparent']
+          }
+          style={styles.ambientOrbBottom}
+          start={{ x: 0.5, y: 0.5 }}
+          end={{ x: 0, y: 0 }}
+        />
+        <View
+          style={[
+            styles.ambientOrbCenter,
+            {
+              backgroundColor: isDark
+                ? 'rgba(59, 130, 246, 0.08)'
+                : 'rgba(37, 99, 235, 0.05)',
+            },
+          ]}
+        />
+      </View>
       <SafeAreaView style={styles.safeArea}>
         {/* Top Bar with Language Selector */}
         <View style={styles.topBar}>
@@ -673,13 +614,44 @@ export default function HomeScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
-    </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
+  dashboardSafeArea: {
+    flex: 1,
+  },
   container: {
     flex: 1,
+  },
+  ambientBackgroundContainer: {
+    ...StyleSheet.absoluteFill,
+    overflow: 'hidden',
+  },
+  ambientOrbTop: {
+    position: 'absolute',
+    top: -80,
+    right: -60,
+    width: 340,
+    height: 340,
+    borderRadius: 170,
+  },
+  ambientOrbBottom: {
+    position: 'absolute',
+    bottom: -100,
+    left: -80,
+    width: 360,
+    height: 360,
+    borderRadius: 180,
+  },
+  ambientOrbCenter: {
+    position: 'absolute',
+    top: '25%',
+    left: '12%',
+    width: 280,
+    height: 280,
+    borderRadius: 140,
   },
   safeArea: {
     flex: 1,
@@ -799,11 +771,11 @@ const styles = StyleSheet.create({
     padding: 24,
     borderWidth: 1,
     gap: 16,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.05,
-    shadowRadius: 18,
-    elevation: 3,
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.16,
+    shadowRadius: 22,
+    elevation: 4,
   },
   cardTitle: {
     fontSize: 22,

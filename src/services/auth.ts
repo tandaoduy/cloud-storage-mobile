@@ -1,14 +1,31 @@
 import * as SecureStore from 'expo-secure-store';
+import { File } from 'expo-file-system';
 
 import { apiFetch } from '@/services/api';
+
 
 const SESSION_KEY = 'cloud_storage_session';
 const LEGACY_SESSION_KEY = 'cloudbox_session';
 
-export type User = { id: string; email: string; display_name: string; role: 'admin' | 'user'; is_active: boolean };
+export type User = {
+  id: string;
+  email: string;
+  display_name: string;
+  role: 'admin' | 'user';
+  is_active: boolean;
+  quota_bytes?: number;
+  used_storage_bytes?: number;
+  avatar_url?: string | null;
+};
 export type Session = { access_token: string; refresh_token: string; expires_in: number; user: User };
 
 type AuthResponse = { data: Session };
+type ProfileResponse = { data: User };
+type StorageResponse = { data: { quota_bytes: number; used_storage_bytes: number; available_bytes: number } };
+export type RemoteFolder = { id: string; name: string; created_at: string; updated_at: string };
+type FoldersResponse = { data: RemoteFolder[] };
+type FolderResponse = { data: RemoteFolder };
+
 
 export async function login(email: string, password: string): Promise<Session> {
   const response = await apiFetch<AuthResponse>('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
@@ -71,4 +88,128 @@ export async function logout(): Promise<void> {
   } finally {
     await clearSession();
   }
+}
+
+export async function fetchProfile(): Promise<User> {
+  let session = await getSession();
+  if (!session) throw new Error('Phiên đăng nhập đã hết hạn.');
+
+  try {
+    const res = await apiFetch<ProfileResponse>('/me', {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    // Update cached user in session
+    session = { ...session, user: { ...session.user, ...res.data } };
+    await saveSession(session);
+    return res.data;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('(401)')) {
+      const refreshed = await refreshSession();
+      const res = await apiFetch<ProfileResponse>('/me', {
+        headers: { Authorization: `Bearer ${refreshed.access_token}` },
+      });
+      session = { ...refreshed, user: { ...refreshed.user, ...res.data } };
+      await saveSession(session);
+      return res.data;
+    }
+    throw error;
+  }
+}
+
+export async function fetchStorageUsage(): Promise<{ quota_bytes: number; used_storage_bytes: number; available_bytes: number }> {
+  let session = await getSession();
+  if (!session) throw new Error('Phiên đăng nhập đã hết hạn.');
+
+  try {
+    const res = await apiFetch<StorageResponse>('/me/storage', {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    return res.data;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('(401)')) {
+      const refreshed = await refreshSession();
+      const res = await apiFetch<StorageResponse>('/me/storage', {
+        headers: { Authorization: `Bearer ${refreshed.access_token}` },
+      });
+      return res.data;
+    }
+    throw error;
+  }
+}
+
+async function authenticatedRequest<T>(path: string, options: RequestInit): Promise<T> {
+  let session = await getSession();
+  if (!session) throw new Error('Phiên đăng nhập đã hết hạn.');
+  const call = (accessToken: string) => apiFetch<T>(path, {
+    ...options,
+    headers: { ...options.headers, Authorization: `Bearer ${accessToken}` },
+  });
+  try {
+    return await call(session.access_token);
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('(401)')) throw error;
+    session = await refreshSession();
+    return call(session.access_token);
+  }
+}
+
+async function cacheUser(user: User): Promise<User> {
+  const session = await getSession();
+  if (session) await saveSession({ ...session, user: { ...session.user, ...user } });
+  return user;
+}
+
+export async function updateProfile(displayName: string): Promise<User> {
+  const response = await authenticatedRequest<ProfileResponse>('/me', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ display_name: displayName }),
+  });
+  return cacheUser(response.data);
+}
+
+export async function fetchFolders(): Promise<RemoteFolder[]> {
+  const response = await authenticatedRequest<FoldersResponse>('/folders', { method: 'GET' });
+  return response.data;
+}
+
+export async function createFolder(name: string): Promise<RemoteFolder> {
+  const response = await authenticatedRequest<FolderResponse>('/folders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  return response.data;
+}
+
+export async function deleteFolder(id: string): Promise<void> {
+  await authenticatedRequest<unknown>(`/folders/${id}`, { method: 'DELETE' });
+}
+
+export async function uploadAvatar(asset: { uri: string; fileName?: string | null; mimeType?: string | null }): Promise<User> {
+  // Expo's SDK 57 fetch implementation serializes multipart files through
+  // File.bytes(). A React Native `{ uri, name, type }` descriptor is not a
+  // supported FormData part there.
+  const image = new File(asset.uri);
+  const form = new FormData();
+  form.append('file', image);
+
+  const response = await authenticatedRequest<ProfileResponse>('/me/avatar', {
+    method: 'POST',
+    body: form,
+  });
+  return cacheUser(response.data);
+}
+
+
+export async function removeAvatar(): Promise<User> {
+  const response = await authenticatedRequest<ProfileResponse>('/me/avatar', { method: 'DELETE' });
+  return cacheUser(response.data);
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<Session> {
+  const response = await authenticatedRequest<AuthResponse>('/me/password', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  await saveSession(response.data);
+  return response.data;
 }
