@@ -23,8 +23,16 @@ type AuthResponse = { data: Session };
 type ProfileResponse = { data: User };
 type StorageResponse = { data: { quota_bytes: number; used_storage_bytes: number; available_bytes: number } };
 export type RemoteFolder = { id: string; name: string; created_at: string; updated_at: string };
+export type StorageUsage = { quota_bytes: number; used_storage_bytes: number; available_bytes: number };
+export type RemoteFile = { id: string; name: string; mime_type: string; size_bytes: number; created_at: string };
 type FoldersResponse = { data: RemoteFolder[] };
 type FolderResponse = { data: RemoteFolder };
+type FilesResponse = { data: RemoteFile[] };
+type UploadResult = { file: RemoteFile; storage: StorageUsage };
+// Accept both the current API envelope and the flat shape returned by older
+// deployed backend versions during a rolling update.
+type UploadFileResponse = { data: UploadResult } | UploadResult;
+type DeleteFileResponse = { data: { storage: StorageUsage } };
 
 
 export async function login(email: string, password: string): Promise<Session> {
@@ -182,6 +190,25 @@ export async function createFolder(name: string): Promise<RemoteFolder> {
 
 export async function deleteFolder(id: string): Promise<void> {
   await authenticatedRequest<unknown>(`/folders/${id}`, { method: 'DELETE' });
+}
+
+export async function fetchFiles(): Promise<RemoteFile[]> {
+  return (await authenticatedRequest<FilesResponse>('/files', { method: 'GET' })).data;
+}
+
+export async function uploadFile(asset: { uri: string }): Promise<UploadResult | null> {
+  const form = new FormData();
+  form.append('file', new File(asset.uri));
+  const response = await authenticatedRequest<UploadFileResponse>('/files/upload', { method: 'POST', body: form });
+  const result = 'data' in response ? response.data : response;
+
+  // Some deployed backend versions acknowledge the upload without returning
+  // metadata. The caller can refresh the file list in that case.
+  return result?.file && result.storage ? result : null;
+}
+
+export async function deleteFile(id: string): Promise<StorageUsage> {
+  return (await authenticatedRequest<DeleteFileResponse>(`/files/${id}`, { method: 'DELETE' })).data.storage;
 }
 
 export async function uploadAvatar(asset: { uri: string; fileName?: string | null; mimeType?: string | null }): Promise<User> {

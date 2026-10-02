@@ -14,9 +14,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { createFolder, deleteFolder, fetchFolders, fetchProfile, fetchStorageUsage, RemoteFolder, Session } from '@/services/auth';
+import { createFolder, deleteFile, deleteFolder, fetchFiles, fetchFolders, fetchProfile, fetchStorageUsage, RemoteFile, RemoteFolder, Session, uploadFile } from '@/services/auth';
 import { AccountSettingsModal } from '@/components/AccountSettingsModal';
 
 type Language = 'vi' | 'en';
@@ -56,6 +57,40 @@ export interface DriveFolder {
 
 const GIGABYTE = 1024 * 1024 * 1024;
 const MEGABYTE = 1024 * 1024;
+const BOTTOM_SHEET_DISMISS_DELAY_MS = 300;
+let isDocumentPickerOpen = false;
+
+function isPickerAlreadyOpenError(error: unknown): boolean {
+  // Expo native exceptions can keep the useful message under `cause` instead of
+  // the top-level Error.message (especially on iOS). Check the whole exception
+  // shape so a harmless duplicate tap never becomes an upload error alert.
+  const messages = new Set<string>();
+  const visit = (value: unknown, depth = 0) => {
+    if (depth > 3 || value == null) return;
+    if (typeof value === 'string') {
+      messages.add(value);
+      return;
+    }
+    if (value instanceof Error) messages.add(value.message);
+    if (typeof value !== 'object') return;
+
+    for (const nestedValue of Object.values(value)) visit(nestedValue, depth + 1);
+  };
+
+  visit(error);
+  const message = [...messages].join(' ').toLowerCase();
+  return message.includes('pickinginprogressexception') || message.includes('document picking in progress');
+}
+
+function fileTypeFromMime(file: RemoteFile): DriveFile['fileType'] {
+  if (file.mime_type.startsWith('image/')) return 'image';
+  if (file.mime_type.startsWith('video/')) return 'video';
+  if (file.mime_type.includes('pdf')) return 'pdf';
+  if (file.mime_type.includes('spreadsheet') || /\.(xlsx?|csv)$/i.test(file.name)) return 'sheet';
+  if (file.mime_type.includes('presentation') || /\.(pptx?)$/i.test(file.name)) return 'slide';
+  if (/\.(zip|rar|7z)$/i.test(file.name)) return 'archive';
+  return 'doc';
+}
 
 export function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -452,31 +487,41 @@ export function UserDashboard({
       .catch(() => undefined);
   }, [toDriveFolder]);
 
-  // Simulate Upload
-  const handleSimulateUpload = (type: DriveFile['fileType']) => {
+  useEffect(() => {
+    void fetchFiles()
+      .then((remoteFiles) => setFiles(remoteFiles.map((file) => ({ id: file.id, name: file.name, fileType: fileTypeFromMime(file), sizeBytes: file.size_bytes, updatedAt: new Date(file.created_at).toLocaleDateString(isVi ? 'vi-VN' : 'en-US'), modifiedBy: 'Bạn', isStarred: false }))))
+      .catch(() => undefined);
+  }, [isVi]);
+
+  const handleUpload = async () => {
+    if (isDocumentPickerOpen) return;
+
+    isDocumentPickerOpen = true;
     setCreateSheetOpen(false);
-    const ext =
-      type === 'doc'
-        ? 'docx'
-        : type === 'sheet'
-        ? 'xlsx'
-        : type === 'slide'
-        ? 'pptx'
-        : type === 'pdf'
-        ? 'pdf'
-        : 'jpg';
-    const newFile: DriveFile = {
-      id: `file-${Date.now()}`,
-      name: `Tài liệu mới ${new Date().toLocaleDateString('vi-VN').replace(/\//g, '_')}.${ext}`,
-      fileType: type,
-      sizeBytes: Math.floor(Math.random() * 8 + 2) * MEGABYTE,
-      updatedAt: isVi ? 'Vừa xong' : 'Just now',
-      modifiedBy: 'Bạn',
-      isStarred: false,
-    };
-    setFiles([newFile, ...files]);
-    setUsedStorageBytes((prev) => prev + newFile.sizeBytes);
-    Alert.alert(isVi ? 'Thành công' : 'Success', t.uploadSuccess);
+    try {
+      // iOS cannot present the system document picker while the React Native
+      // bottom sheet is still being dismissed. Wait for that animation first.
+      await new Promise<void>((resolve) => setTimeout(resolve, BOTTOM_SHEET_DISMISS_DELAY_MS));
+      const picked = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
+      if (picked.canceled || !picked.assets[0]) return;
+
+      const uploaded = await uploadFile(picked.assets[0]);
+      if (uploaded) {
+        const type = fileTypeFromMime(uploaded.file);
+        setFiles((current) => [{ id: uploaded.file.id, name: uploaded.file.name, fileType: type, sizeBytes: uploaded.file.size_bytes, updatedAt: isVi ? 'Vừa xong' : 'Just now', modifiedBy: 'Bạn', isStarred: false }, ...current]);
+        setUsedStorageBytes(uploaded.storage.used_storage_bytes);
+      } else {
+        const [remoteFiles, storage] = await Promise.all([fetchFiles(), fetchStorageUsage()]);
+        setFiles(remoteFiles.map((file) => ({ id: file.id, name: file.name, fileType: fileTypeFromMime(file), sizeBytes: file.size_bytes, updatedAt: new Date(file.created_at).toLocaleDateString(isVi ? 'vi-VN' : 'en-US'), modifiedBy: 'Bạn', isStarred: false })));
+        setUsedStorageBytes(storage.used_storage_bytes);
+      }
+      Alert.alert(isVi ? 'Thành công' : 'Success', t.uploadSuccess);
+    } catch (error) {
+      if (isPickerAlreadyOpenError(error)) return;
+      Alert.alert(isVi ? 'Không thể tải lên' : 'Upload failed', error instanceof Error ? error.message : String(error));
+    } finally {
+      isDocumentPickerOpen = false;
+    }
   };
 
   // Delete file
@@ -487,9 +532,14 @@ export function UserDashboard({
       {
         text: t.delete,
         style: 'destructive',
-        onPress: () => {
-          setFiles((prev) => prev.filter((f) => f.id !== file.id));
-          setUsedStorageBytes((prev) => Math.max(0, prev - file.sizeBytes));
+        onPress: async () => {
+          try {
+            const storage = await deleteFile(file.id);
+            setFiles((prev) => prev.filter((f) => f.id !== file.id));
+            setUsedStorageBytes(storage.used_storage_bytes);
+          } catch (error) {
+            Alert.alert(isVi ? 'Không thể xóa tệp' : 'Unable to delete file', error instanceof Error ? error.message : String(error));
+          }
         },
       },
     ]);
@@ -1157,7 +1207,7 @@ export function UserDashboard({
 
               {/* 2: Upload */}
               <Pressable
-                onPress={() => handleSimulateUpload('pdf')}
+                onPress={() => void handleUpload()}
                 style={styles.createGridItem}>
                 <View style={[styles.createIconCircle, { backgroundColor: isDark ? '#334155' : '#F1F5F9' }]}>
                   <Ionicons name="arrow-up" size={26} color="#2563EB" />
@@ -1167,7 +1217,7 @@ export function UserDashboard({
 
               {/* 3: Scan */}
               <Pressable
-                onPress={() => handleSimulateUpload('doc')}
+                onPress={() => void handleUpload()}
                 style={styles.createGridItem}>
                 <View style={[styles.createIconCircle, { backgroundColor: isDark ? '#334155' : '#F1F5F9' }]}>
                   <Ionicons name="camera-outline" size={26} color="#10B981" />
@@ -1177,7 +1227,7 @@ export function UserDashboard({
 
               {/* 4: Docs */}
               <Pressable
-                onPress={() => handleSimulateUpload('doc')}
+                onPress={() => void handleUpload()}
                 style={styles.createGridItem}>
                 <View style={[styles.createIconCircle, { backgroundColor: isDark ? '#334155' : '#F1F5F9' }]}>
                   <Ionicons name="document-text" size={26} color="#2563EB" />
@@ -1187,7 +1237,7 @@ export function UserDashboard({
 
               {/* 5: Sheets */}
               <Pressable
-                onPress={() => handleSimulateUpload('sheet')}
+                onPress={() => void handleUpload()}
                 style={styles.createGridItem}>
                 <View style={[styles.createIconCircle, { backgroundColor: isDark ? '#334155' : '#F1F5F9' }]}>
                   <Ionicons name="stats-chart" size={26} color="#10B981" />
@@ -1197,7 +1247,7 @@ export function UserDashboard({
 
               {/* 6: Slides */}
               <Pressable
-                onPress={() => handleSimulateUpload('slide')}
+                onPress={() => void handleUpload()}
                 style={styles.createGridItem}>
                 <View style={[styles.createIconCircle, { backgroundColor: isDark ? '#334155' : '#F1F5F9' }]}>
                   <Ionicons name="easel" size={26} color="#F59E0B" />

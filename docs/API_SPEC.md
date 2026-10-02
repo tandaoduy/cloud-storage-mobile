@@ -211,6 +211,37 @@ Xóa vĩnh viễn thư mục của tài khoản hiện tại. Response `204 No C
 
 ## 6. Files
 
+Các endpoint dưới đây đã được triển khai cho MVP; yêu cầu access token.
+
+### `GET /files`
+
+Liệt kê tệp của tài khoản hiện tại, mới nhất trước.
+
+**Response 200**
+
+```json
+{ "data": [{ "id": "uuid", "name": "bao-cao.pdf", "mime_type": "application/pdf", "size_bytes": 248192, "created_at": "2026-10-01T00:00:00+00:00" }] }
+```
+
+### `POST /files/upload`
+
+Tải mọi loại tệp bằng `multipart/form-data` với trường `file`. Backend ghi theo luồng, tính kích thước thực tế và khóa bản ghi người dùng trước khi kiểm quota. Giới hạn mặc định là 1 GiB/tệp, thay đổi qua `MAX_UPLOAD_BYTES`.
+
+**Response 201**: trả metadata và dung lượng mới ngay khi transaction thành công.
+
+```json
+{
+  "data": {
+    "file": { "id": "uuid", "name": "bao-cao.pdf", "mime_type": "application/pdf", "size_bytes": 248192, "created_at": "2026-10-01T00:00:00+00:00" },
+    "storage": { "quota_bytes": 16106127360, "used_storage_bytes": 248192, "available_bytes": 16105879168 }
+  }
+}
+```
+
+### `GET /files/{file_id}/download`
+
+Tải tệp gốc của chính người dùng. API yêu cầu access token và không công khai đường dẫn file trên disk.
+
 ### `GET /files`
 
 List file của người dùng. Query hỗ trợ `folder_id`, `starred`, `limit`, `cursor`, `sort_by`, `sort_order`.
@@ -271,7 +302,7 @@ Trả signed download URL có hạn ngắn. Viewer, editor và owner đều dùn
 
 ### `DELETE /files/{file_id}`
 
-Xoá mềm tệp. Response `204`.
+Xóa metadata và file vật lý của chính người dùng. Response `200` trả `storage` với `used_storage_bytes` đã giảm ngay.
 
 ## 7. Search, recent, starred và trash
 

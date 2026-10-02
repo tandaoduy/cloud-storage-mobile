@@ -15,6 +15,8 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 
 import { changePassword, removeAvatar, updateProfile, uploadAvatar, type User } from '@/services/auth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -49,6 +51,10 @@ export function AccountSettingsModal(props: Props) {
 function AccountSettingsContent({ user, onClose, onUserUpdated, language }: Props) {
   const vi = language === 'vi';
   const isDark = useColorScheme() === 'dark';
+  const insets = useSafeAreaInsets();
+  const topPadding = Platform.OS === 'ios'
+    ? (insets.top > 0 ? insets.top : 47) + 8
+    : Math.max(insets.top, 14);
   const colors = {
     background: isDark ? '#0F172A' : '#F8FAFC',
     surface: isDark ? '#1E293B' : '#FFFFFF',
@@ -177,14 +183,32 @@ function AccountSettingsContent({ user, onClose, onUserUpdated, language }: Prop
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <View style={[styles.header, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: colors.surface,
+            borderColor: colors.border,
+            paddingTop: topPadding,
+            paddingLeft: Math.max(insets.left, 20),
+            paddingRight: Math.max(insets.right, 20),
+          },
+        ]}>
         <Text style={[styles.title, { color: colors.text }]}>{vi ? 'Cài đặt tài khoản' : 'Account settings'}</Text>
-        <Pressable onPress={onClose} hitSlop={10}>
+        <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel={vi ? 'Đóng' : 'Close'}>
           <Ionicons name="close" size={26} color={colors.text} />
         </Pressable>
       </View>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingBottom: Math.max(insets.bottom, 16) + 24,
+            paddingLeft: Math.max(insets.left, 20),
+            paddingRight: Math.max(insets.right, 20),
+          },
+        ]}
         automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled">
@@ -373,8 +397,7 @@ function AccountSettingsContent({ user, onClose, onUserUpdated, language }: Prop
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   header: {
-    padding: 20,
-    paddingTop: 24,
+    paddingBottom: 16,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',

@@ -18,8 +18,10 @@ services:
       DATABASE_URL: postgresql+asyncpg://cloudbox:cloudbox@db:5432/cloudbox
       ALLOWED_ORIGINS: http://localhost:8081,http://127.0.0.1:8081
     ports: ["8000:8000"]
+    volumes: ["uploads_data:/app/uploads"]
     command: sh -c "alembic upgrade head && fastapi run app/main.py --host 0.0.0.0 --port 8000"
     depends_on:
       db: { condition: service_healthy }
 volumes:
   postgres_data:
+  uploads_data:

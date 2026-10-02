@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -9,6 +10,8 @@ class Settings(BaseSettings):
     secret_key: str = "change-this-development-secret-before-production"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 30
+    upload_directory: Path = Path("uploads/files")
+    max_upload_bytes: int = 1024 * 1024 * 1024
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
