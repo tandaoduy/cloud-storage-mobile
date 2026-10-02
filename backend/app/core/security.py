@@ -30,6 +30,18 @@ def create_access_token(user_id: str, role: str) -> str:
     return jwt.encode(payload, settings.secret_key, algorithm="HS256")
 
 
+def create_file_view_token(user_id: str, file_id: str) -> str:
+    """Create a short-lived token scoped to viewing exactly one file."""
+    settings = get_settings()
+    payload = {
+        "sub": user_id,
+        "file_id": file_id,
+        "scope": "file:view",
+        "exp": datetime.now(UTC) + timedelta(minutes=5),
+    }
+    return jwt.encode(payload, settings.secret_key, algorithm="HS256")
+
+
 def create_refresh_token() -> str:
     """Create a cryptographically secure opaque refresh token."""
     return secrets.token_urlsafe(48)

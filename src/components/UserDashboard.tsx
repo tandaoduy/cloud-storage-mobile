@@ -15,9 +15,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
+import { WebView } from 'react-native-webview';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { createFolder, deleteFile, deleteFolder, fetchFiles, fetchFolders, fetchProfile, fetchStorageUsage, RemoteFile, RemoteFolder, renameFile, Session, uploadFile } from '@/services/auth';
+import { createFolder, deleteFile, deleteFolder, getFileViewUrl, fetchFiles, fetchFolders, fetchProfile, fetchStorageUsage, RemoteFile, RemoteFolder, renameFile, Session, uploadFile } from '@/services/auth';
 import { AccountSettingsModal } from '@/components/AccountSettingsModal';
 
 type Language = 'vi' | 'en';
@@ -269,6 +270,8 @@ export function UserDashboard({
   const [selectedFile, setSelectedFile] = useState<DriveFile | null>(null);
   const [renameFileModalOpen, setRenameFileModalOpen] = useState(false);
   const [renameFileName, setRenameFileName] = useState('');
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+  const [viewerFileName, setViewerFileName] = useState('');
   const [storageModalOpen, setStorageModalOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -316,6 +319,7 @@ export function UserDashboard({
           addToStarred: 'Thêm vào mục có dấu sao',
           removeFromStarred: 'Xóa khỏi mục có dấu sao',
           download: 'Tải xuống',
+          view: 'Xem tệp',
           rename: 'Đổi tên',
           fileNameHint: 'Nhập tên tệp',
           fileExtensionLocked: 'Đuôi tệp được giữ nguyên',
@@ -372,6 +376,7 @@ export function UserDashboard({
           addToStarred: 'Add to Starred',
           removeFromStarred: 'Remove from Starred',
           download: 'Download',
+          view: 'View file',
           rename: 'Rename',
           fileNameHint: 'Enter file name',
           fileExtensionLocked: 'File extension is kept unchanged',
@@ -578,6 +583,18 @@ export function UserDashboard({
       setRenameFileName('');
     } catch (error) {
       Alert.alert(isVi ? 'Không thể đổi tên tệp' : 'Unable to rename file', error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleViewFile = async (file: DriveFile) => {
+    setFileActionSheetOpen(false);
+    try {
+      const viewUrl = await getFileViewUrl(file.id);
+      await new Promise<void>((resolve) => setTimeout(resolve, BOTTOM_SHEET_DISMISS_DELAY_MS));
+      setViewerFileName(file.name);
+      setViewerUrl(viewUrl);
+    } catch (error) {
+      Alert.alert(isVi ? 'Không thể mở tệp' : 'Unable to open file', error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -1295,6 +1312,16 @@ export function UserDashboard({
         </Pressable>
       </Modal>
 
+      <Modal visible={viewerUrl !== null} animationType="slide" onRequestClose={() => setViewerUrl(null)}>
+        <View style={[styles.viewerHeader, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF', borderBottomColor: dividerColor, height: insets.top + 56, paddingTop: insets.top }]}>
+          <Text style={[styles.dialogTitle, { color: textColor, marginBottom: 0, flex: 1 }]} numberOfLines={1}>{viewerFileName}</Text>
+          <Pressable onPress={() => setViewerUrl(null)} hitSlop={12}>
+            <Ionicons name="close" size={26} color={textColor} />
+          </Pressable>
+        </View>
+        {viewerUrl && <WebView source={{ uri: viewerUrl }} startInLoadingState />}
+      </Modal>
+
       {/* 8. MODAL: LEFT NAVIGATION DRAWER */}
       <Modal
         visible={drawerOpen}
@@ -1456,12 +1483,11 @@ export function UserDashboard({
 
             <Pressable
               onPress={() => {
-                setFileActionSheetOpen(false);
-                Alert.alert(t.download, isVi ? 'Đang chuẩn bị tải xuống...' : 'Preparing download...');
+                if (selectedFile) void handleViewFile(selectedFile);
               }}
               style={styles.actionSheetItem}>
-              <Ionicons name="download-outline" size={20} color={textColor} />
-              <Text style={[styles.actionSheetItemText, { color: textColor }]}>{t.download}</Text>
+              <Ionicons name="eye-outline" size={20} color={textColor} />
+              <Text style={[styles.actionSheetItemText, { color: textColor }]}>{t.view}</Text>
             </Pressable>
 
             <Pressable
@@ -2196,6 +2222,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     fontSize: 14,
     marginBottom: 18,
+  },
+  viewerHeader: {
+    height: 56,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   renameFileInputRow: {
     height: 48,

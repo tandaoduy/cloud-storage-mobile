@@ -1,7 +1,8 @@
 import * as SecureStore from 'expo-secure-store';
-import { File } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 
 import { apiFetch } from '@/services/api';
+import { API_URL } from '@/config/env';
 
 
 const SESSION_KEY = 'cloud_storage_session';
@@ -34,6 +35,7 @@ type UploadResult = { file: RemoteFile; storage: StorageUsage };
 type UploadFileResponse = { data: UploadResult } | UploadResult;
 type DeleteFileResponse = { data: { storage: StorageUsage } };
 type RenameFileResponse = { data: RemoteFile };
+type FileViewTokenResponse = { data: { token: string } };
 
 
 export async function login(email: string, password: string): Promise<Session> {
@@ -222,6 +224,22 @@ export async function renameFile(id: string, name: string): Promise<RemoteFile> 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
   })).data;
+}
+
+export async function downloadFileForViewing(id: string, name: string): Promise<File> {
+  const session = await getSession();
+  if (!session) throw new Error('Phiên đăng nhập đã hết hạn.');
+
+  const destination = new File(Paths.cache, `${id}-${name}`);
+  return File.downloadFileAsync(`${API_URL}/files/${id}/download`, destination, {
+    headers: { Authorization: `Bearer ${session.access_token}` },
+    idempotent: true,
+  });
+}
+
+export async function getFileViewUrl(id: string): Promise<string> {
+  const response = await authenticatedRequest<FileViewTokenResponse>(`/files/${id}/view-token`, { method: 'POST' });
+  return `${API_URL}/files/${id}/view?token=${encodeURIComponent(response.data.token)}`;
 }
 
 export async function uploadAvatar(asset: { uri: string; fileName?: string | null; mimeType?: string | null }): Promise<User> {
