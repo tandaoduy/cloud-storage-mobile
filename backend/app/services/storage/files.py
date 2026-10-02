@@ -51,7 +51,14 @@ class FileService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy tệp.")
         return item
 
-    async def upload(self, db: AsyncSession, user: User, upload: UploadFile) -> dict:
+    async def upload(
+        self,
+        db: AsyncSession,
+        user: User,
+        upload: UploadFile,
+        *,
+        original_name: str | None = None,
+    ) -> dict:
         """Persist an upload and atomically add its actual size to quota usage."""
         settings = get_settings()
         root = settings.upload_directory
@@ -59,7 +66,7 @@ class FileService:
         root.mkdir(parents=True, exist_ok=True)
         temporary_dir.mkdir(parents=True, exist_ok=True)
 
-        name = Path(upload.filename or "untitled").name
+        name = Path(original_name or upload.filename or "untitled").name
         if not name or name in {".", ".."}:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

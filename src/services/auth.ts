@@ -196,9 +196,13 @@ export async function fetchFiles(): Promise<RemoteFile[]> {
   return (await authenticatedRequest<FilesResponse>('/files', { method: 'GET' })).data;
 }
 
-export async function uploadFile(asset: { uri: string }): Promise<UploadResult | null> {
+export async function uploadFile(asset: { uri: string; name: string }): Promise<UploadResult | null> {
   const form = new FormData();
-  form.append('file', new File(asset.uri));
+  // The cache copy created by iOS uses a UUID filename. Supply the picker
+  // asset's original name explicitly. The separate field is used by the API
+  // because some iOS multipart implementations replace the part filename.
+  form.append('file', new File(asset.uri), asset.name);
+  form.append('original_name', asset.name);
   const response = await authenticatedRequest<UploadFileResponse>('/files/upload', { method: 'POST', body: form });
   const result = 'data' in response ? response.data : response;
 
