@@ -5,7 +5,7 @@ from uuid import UUID
 
 from typing import Generic, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 ResponseData = TypeVar("ResponseData")
 
@@ -24,6 +24,12 @@ class FileMetadata(BaseModel):
     mime_type: str
     size_bytes: int
     created_at: datetime
+
+
+class RenameFileRequest(BaseModel):
+    """Payload for changing the display name of an owned file."""
+
+    name: str = Field(min_length=1, max_length=255)
 
 
 class StorageUsage(BaseModel):

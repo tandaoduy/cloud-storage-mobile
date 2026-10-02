@@ -149,3 +149,34 @@ class FileService:
         # A failed unlink only leaves a safe orphan; the database stays authoritative.
         path.unlink(missing_ok=True)
         return {"storage": self.storage_usage(locked_user)}
+
+    async def rename(self, db: AsyncSession, user: User, file_id: UUID, name: str) -> dict:
+        """Update display metadata without moving the underlying stored object."""
+        sanitized_name = Path(name.strip()).name
+        if not sanitized_name or sanitized_name in {".", ".."}:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Tên tệp không hợp lệ.",
+            )
+
+        item = await self.get_file(db, file_id, user.id)
+        original_extension = Path(item.name).suffix
+        requested_extension = Path(sanitized_name).suffix
+        if original_extension:
+            if requested_extension.lower() != original_extension.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Không được thay đổi đuôi tệp.",
+                )
+
+            requested_stem = sanitized_name[: -len(original_extension)]
+            if not requested_stem or Path(requested_stem).suffix:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Chỉ được đổi phần tên, không được nhập đuôi tệp.",
+                )
+
+        item.name = sanitized_name
+        await db.commit()
+        await db.refresh(item)
+        return self.serialize(item)

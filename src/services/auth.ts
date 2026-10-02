@@ -33,6 +33,7 @@ type UploadResult = { file: RemoteFile; storage: StorageUsage };
 // deployed backend versions during a rolling update.
 type UploadFileResponse = { data: UploadResult } | UploadResult;
 type DeleteFileResponse = { data: { storage: StorageUsage } };
+type RenameFileResponse = { data: RemoteFile };
 
 
 export async function login(email: string, password: string): Promise<Session> {
@@ -213,6 +214,14 @@ export async function uploadFile(asset: { uri: string; name: string }): Promise<
 
 export async function deleteFile(id: string): Promise<StorageUsage> {
   return (await authenticatedRequest<DeleteFileResponse>(`/files/${id}`, { method: 'DELETE' })).data.storage;
+}
+
+export async function renameFile(id: string, name: string): Promise<RemoteFile> {
+  return (await authenticatedRequest<RenameFileResponse>(`/files/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })).data;
 }
 
 export async function uploadAvatar(asset: { uri: string; fileName?: string | null; mimeType?: string | null }): Promise<User> {

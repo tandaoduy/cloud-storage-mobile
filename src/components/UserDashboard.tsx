@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { createFolder, deleteFile, deleteFolder, fetchFiles, fetchFolders, fetchProfile, fetchStorageUsage, RemoteFile, RemoteFolder, Session, uploadFile } from '@/services/auth';
+import { createFolder, deleteFile, deleteFolder, fetchFiles, fetchFolders, fetchProfile, fetchStorageUsage, RemoteFile, RemoteFolder, renameFile, Session, uploadFile } from '@/services/auth';
 import { AccountSettingsModal } from '@/components/AccountSettingsModal';
 
 type Language = 'vi' | 'en';
@@ -90,6 +90,12 @@ function fileTypeFromMime(file: RemoteFile): DriveFile['fileType'] {
   if (file.mime_type.includes('presentation') || /\.(pptx?)$/i.test(file.name)) return 'slide';
   if (/\.(zip|rar|7z)$/i.test(file.name)) return 'archive';
   return 'doc';
+}
+
+function splitFileName(name: string): { stem: string; extension: string } {
+  const lastDotIndex = name.lastIndexOf('.');
+  if (lastDotIndex <= 0 || lastDotIndex === name.length - 1) return { stem: name, extension: '' };
+  return { stem: name.slice(0, lastDotIndex), extension: name.slice(lastDotIndex) };
 }
 
 export function formatBytes(bytes: number): string {
@@ -261,6 +267,8 @@ export function UserDashboard({
   const [newFolderName, setNewFolderName] = useState('');
   const [fileActionSheetOpen, setFileActionSheetOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<DriveFile | null>(null);
+  const [renameFileModalOpen, setRenameFileModalOpen] = useState(false);
+  const [renameFileName, setRenameFileName] = useState('');
   const [storageModalOpen, setStorageModalOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -309,6 +317,8 @@ export function UserDashboard({
           removeFromStarred: 'Xóa khỏi mục có dấu sao',
           download: 'Tải xuống',
           rename: 'Đổi tên',
+          fileNameHint: 'Nhập tên tệp',
+          fileExtensionLocked: 'Đuôi tệp được giữ nguyên',
           move: 'Di chuyển',
           details: 'Chi tiết tệp tin',
           delete: 'Xóa',
@@ -363,6 +373,8 @@ export function UserDashboard({
           removeFromStarred: 'Remove from Starred',
           download: 'Download',
           rename: 'Rename',
+          fileNameHint: 'Enter file name',
+          fileExtensionLocked: 'File extension is kept unchanged',
           move: 'Move',
           details: 'File details',
           delete: 'Remove',
@@ -543,6 +555,30 @@ export function UserDashboard({
         },
       },
     ]);
+  };
+
+  const handleRenameFile = async () => {
+    const stem = renameFileName.trim();
+    if (!selectedFile || !stem) {
+      Alert.alert(isVi ? 'Tên tệp chưa hợp lệ' : 'Invalid file name', isVi ? 'Vui lòng nhập tên tệp.' : 'Enter a file name.');
+      return;
+    }
+
+    const { extension } = splitFileName(selectedFile.name);
+    if (extension && splitFileName(stem).extension) {
+      Alert.alert(isVi ? 'Không thể đổi tên tệp' : 'Unable to rename file', isVi ? 'Chỉ nhập phần tên, không nhập đuôi tệp như .pdf, .docx hoặc .jpg.' : 'Enter only the name, without an extension such as .pdf, .docx, or .jpg.');
+      return;
+    }
+
+    try {
+      const renamed = await renameFile(selectedFile.id, `${stem}${extension}`);
+      setFiles((current) => current.map((file) => file.id === renamed.id ? { ...file, name: renamed.name } : file));
+      setSelectedFile((current) => current?.id === renamed.id ? { ...current, name: renamed.name } : current);
+      setRenameFileModalOpen(false);
+      setRenameFileName('');
+    } catch (error) {
+      Alert.alert(isVi ? 'Không thể đổi tên tệp' : 'Unable to rename file', error instanceof Error ? error.message : String(error));
+    }
   };
 
   // Filtered files
@@ -1431,16 +1467,9 @@ export function UserDashboard({
             <Pressable
               onPress={() => {
                 setFileActionSheetOpen(false);
-                if ('prompt' in Alert && typeof Alert.prompt === 'function') {
-                  Alert.prompt(t.rename, '', (newName) => {
-                    if (newName && selectedFile) {
-                      setFiles((prev) =>
-                        prev.map((f) => (f.id === selectedFile.id ? { ...f, name: newName } : f))
-                      );
-                    }
-                  });
-                } else {
-                  Alert.alert(t.rename, isVi ? 'Tính năng đổi tên tệp tin.' : 'Rename file feature.');
+                if (selectedFile) {
+                  setRenameFileName(splitFileName(selectedFile.name).stem);
+                  setRenameFileModalOpen(true);
                 }
               }}
               style={styles.actionSheetItem}>
@@ -1460,7 +1489,48 @@ export function UserDashboard({
         </Pressable>
       </Modal>
 
-      {/* 10. MODAL: CREATE NEW FOLDER DIALOG */}
+      {/* 10. MODAL: RENAME FILE DIALOG */}
+      <Modal
+        visible={renameFileModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRenameFileModalOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.dialogCard, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' }]}>
+            <Text style={[styles.dialogTitle, { color: textColor }]}>{t.rename}</Text>
+            <View style={[styles.renameFileInputRow, { backgroundColor: surfaceContainer, borderColor: '#2563EB' }]}>
+              <TextInput
+                value={renameFileName}
+                onChangeText={setRenameFileName}
+                placeholder={t.fileNameHint}
+                placeholderTextColor={textMuted}
+                autoFocus
+                style={[styles.renameFileTextInput, { color: textColor }]}
+              />
+              {!!selectedFile && !!splitFileName(selectedFile.name).extension && (
+                <Text style={[styles.renameFileExtension, { color: textMuted }]}>
+                  {splitFileName(selectedFile.name).extension}
+                </Text>
+              )}
+            </View>
+            <View style={styles.dialogButtonsRow}>
+              <Pressable
+                onPress={() => {
+                  setRenameFileName('');
+                  setRenameFileModalOpen(false);
+                }}
+                style={styles.dialogTextBtn}>
+                <Text style={styles.dialogCancelText}>{t.cancel}</Text>
+              </Pressable>
+              <Pressable onPress={() => void handleRenameFile()} style={styles.dialogTextBtn}>
+                <Text style={styles.dialogConfirmText}>{t.rename}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 11. MODAL: CREATE NEW FOLDER DIALOG */}
       <Modal
         visible={newFolderModalOpen}
         transparent
@@ -2126,6 +2196,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     fontSize: 14,
     marginBottom: 18,
+  },
+  renameFileInputRow: {
+    height: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 8,
+    borderWidth: 1.5,
+    paddingHorizontal: 12,
+    marginBottom: 18,
+  },
+  renameFileTextInput: {
+    flex: 1,
+    height: '100%',
+    fontSize: 14,
+    paddingVertical: 0,
+  },
+  renameFileExtension: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   dialogButtonsRow: {
     flexDirection: 'row',
