@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
 from app.core.config import get_settings
-from app import models  # noqa: F401 - registers SQLAlchemy models for Alembic
+from app import models  # pylint: disable=unused-import  # registers models for Alembic
 
 settings = get_settings()
 app = FastAPI(title="Cloud Storage API", version="0.1.0")

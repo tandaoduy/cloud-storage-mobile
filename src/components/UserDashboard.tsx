@@ -18,7 +18,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { WebView } from 'react-native-webview';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { createFolder, deleteFile, deleteFolder, getFileViewUrl, fetchFiles, fetchFolders, fetchProfile, fetchStorageUsage, RemoteFile, RemoteFolder, renameFile, Session, uploadFile } from '@/services/auth';
+import { createFolder, deleteFile, deleteFolder, emptyTrash, fetchFileDetails, fetchFiles, fetchFolders, fetchProfile, fetchStorageUsage, fetchTrashFiles, getFileViewUrl, permanentlyDeleteFile, RemoteFile, RemoteFolder, renameFile, restoreFile, Session, setFileStarred, uploadFile } from '@/services/auth';
 import { AccountSettingsModal } from '@/components/AccountSettingsModal';
 
 type Language = 'vi' | 'en';
@@ -51,6 +51,7 @@ export interface DriveFile {
 export interface DriveFolder {
   id: string;
   name: string;
+  parentId: string | null;
   itemCount: number;
   updatedAt: string;
   color?: string;
@@ -109,10 +110,10 @@ export function formatBytes(bytes: number): string {
 
 // Initial Mock Data
 const INITIAL_FOLDERS: DriveFolder[] = [
-  { id: 'f1', name: 'Tài liệu học tập', itemCount: 14, updatedAt: 'Hôm nay' },
-  { id: 'f2', name: 'Đồ án tốt nghiệp 65CNTT', itemCount: 8, updatedAt: 'Hôm qua' },
-  { id: 'f3', name: 'Ảnh kỷ niệm & Thực tập', itemCount: 42, updatedAt: '3 ngày trước' },
-  { id: 'f4', name: 'Hóa đơn & Chứng từ', itemCount: 5, updatedAt: '26 thg 9' },
+  { id: 'f1', name: 'Tài liệu học tập', parentId: null, itemCount: 14, updatedAt: 'Hôm nay' },
+  { id: 'f2', name: 'Đồ án tốt nghiệp 65CNTT', parentId: null, itemCount: 8, updatedAt: 'Hôm qua' },
+  { id: 'f3', name: 'Ảnh kỷ niệm & Thực tập', parentId: null, itemCount: 42, updatedAt: '3 ngày trước' },
+  { id: 'f4', name: 'Hóa đơn & Chứng từ', parentId: null, itemCount: 5, updatedAt: '26 thg 9' },
 ];
 
 const INITIAL_FILES: DriveFile[] = [
@@ -257,7 +258,9 @@ export function UserDashboard({
 
   // Files & Folders state
   const [folders, setFolders] = useState<DriveFolder[]>(INITIAL_FOLDERS);
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [files, setFiles] = useState<DriveFile[]>(INITIAL_FILES);
+  const [trashFiles, setTrashFiles] = useState<DriveFile[]>([]);
   const [sharedFiles] = useState<DriveFile[]>(SHARED_FILES);
 
   // Modals & Dropdown state
@@ -272,8 +275,10 @@ export function UserDashboard({
   const [renameFileName, setRenameFileName] = useState('');
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
   const [viewerFileName, setViewerFileName] = useState('');
+  const [fileDetails, setFileDetails] = useState<RemoteFile | null>(null);
   const [storageModalOpen, setStorageModalOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
 
   // Translations
   const isVi = language === 'vi';
@@ -445,17 +450,39 @@ export function UserDashboard({
   }, [quotaBytes, usedStorageBytes]);
 
   // Star / Unstar
-  const toggleStar = (fileId: string) => {
-    setFiles((prev) =>
-      prev.map((f) => (f.id === fileId ? { ...f, isStarred: !f.isStarred } : f))
-    );
+  const toggleStar = async (fileId: string) => {
+    const currentFile = files.find((file) => file.id === fileId);
+    if (!currentFile) return;
+
+    try {
+      const updated = await setFileStarred(fileId, !currentFile.isStarred);
+      setFiles((current) => current.map((file) => (
+        file.id === updated.id ? { ...file, isStarred: updated.is_starred } : file
+      )));
+      setSelectedFile((current) => (
+        current?.id === updated.id ? { ...current, isStarred: updated.is_starred } : current
+      ));
+    } catch (error) {
+      Alert.alert(isVi ? 'Không thể cập nhật' : 'Unable to update', error instanceof Error ? error.message : String(error));
+    }
   };
 
   const toDriveFolder = useCallback((folder: RemoteFolder): DriveFolder => ({
     id: folder.id,
     name: folder.name,
+    parentId: folder.parent_id,
     itemCount: 0,
     updatedAt: new Date(folder.updated_at).toLocaleDateString(isVi ? 'vi-VN' : 'en-US'),
+  }), [isVi]);
+
+  const toDriveFile = useCallback((file: RemoteFile): DriveFile => ({
+    id: file.id,
+    name: file.name,
+    fileType: fileTypeFromMime(file),
+    sizeBytes: file.size_bytes,
+    updatedAt: new Date(file.created_at).toLocaleDateString(isVi ? 'vi-VN' : 'en-US'),
+    modifiedBy: isVi ? 'Bạn' : 'You',
+    isStarred: file.is_starred,
   }), [isVi]);
 
   // Create Folder
@@ -466,7 +493,7 @@ export function UserDashboard({
       return;
     }
     try {
-      const folder = toDriveFolder(await createFolder(name));
+      const folder = toDriveFolder(await createFolder(name, currentFolderId));
       setFolders((current) => [folder, ...current]);
       setNewFolderName('');
       setNewFolderModalOpen(false);
@@ -488,7 +515,20 @@ export function UserDashboard({
           onPress: async () => {
             try {
               await deleteFolder(folder.id);
-              setFolders((current) => current.filter((item) => item.id !== folder.id));
+              setFolders((current) => {
+                const deletedIds = new Set([folder.id]);
+                let foundChild = true;
+                while (foundChild) {
+                  foundChild = false;
+                  for (const item of current) {
+                    if (item.parentId && deletedIds.has(item.parentId) && !deletedIds.has(item.id)) {
+                      deletedIds.add(item.id);
+                      foundChild = true;
+                    }
+                  }
+                }
+                return current.filter((item) => !deletedIds.has(item.id));
+              });
             } catch (error) {
               Alert.alert(isVi ? 'Không thể xóa thư mục' : 'Unable to delete folder', error instanceof Error ? error.message : String(error));
             }
@@ -506,9 +546,89 @@ export function UserDashboard({
 
   useEffect(() => {
     void fetchFiles()
-      .then((remoteFiles) => setFiles(remoteFiles.map((file) => ({ id: file.id, name: file.name, fileType: fileTypeFromMime(file), sizeBytes: file.size_bytes, updatedAt: new Date(file.created_at).toLocaleDateString(isVi ? 'vi-VN' : 'en-US'), modifiedBy: 'Bạn', isStarred: false }))))
+      .then((remoteFiles) => setFiles(remoteFiles.map(toDriveFile)))
       .catch(() => undefined);
-  }, [isVi]);
+  }, [toDriveFile]);
+
+  const openTrash = async () => {
+    setDrawerOpen(false);
+    try {
+      const remoteFiles = await fetchTrashFiles();
+      setTrashFiles(remoteFiles.map(toDriveFile));
+      setTrashOpen(true);
+    } catch (error) {
+      Alert.alert(isVi ? 'Không thể mở Thùng rác' : 'Unable to open Trash', error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleRestoreFile = (file: DriveFile) => {
+    Alert.alert(
+      isVi ? 'Khôi phục tệp?' : 'Restore file?',
+      isVi ? `Khôi phục “${file.name}” về danh sách tệp của bạn?` : `Restore “${file.name}” to your files?`,
+      [
+        { text: t.cancel, style: 'cancel' },
+        {
+          text: isVi ? 'Khôi phục' : 'Restore',
+          onPress: async () => {
+            try {
+              const restored = await restoreFile(file.id);
+              setTrashFiles((current) => current.filter((item) => item.id !== restored.id));
+              setFiles((current) => [toDriveFile(restored), ...current]);
+            } catch (error) {
+              Alert.alert(isVi ? 'Không thể khôi phục tệp' : 'Unable to restore file', error instanceof Error ? error.message : String(error));
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleEmptyTrash = () => {
+    if (trashFiles.length === 0) return;
+    Alert.alert(
+      isVi ? 'Xóa tất cả trong Thùng rác?' : 'Empty Trash?',
+      isVi ? `${trashFiles.length} tệp sẽ bị xóa vĩnh viễn và không thể khôi phục.` : `${trashFiles.length} files will be permanently deleted and cannot be restored.`,
+      [
+        { text: t.cancel, style: 'cancel' },
+        {
+          text: isVi ? 'Xóa tất cả' : 'Empty Trash',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const storage = await emptyTrash();
+              setTrashFiles([]);
+              setUsedStorageBytes(storage.used_storage_bytes);
+            } catch (error) {
+              Alert.alert(isVi ? 'Không thể xóa Thùng rác' : 'Unable to empty Trash', error instanceof Error ? error.message : String(error));
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handlePermanentlyDeleteFile = (file: DriveFile) => {
+    Alert.alert(
+      isVi ? 'Xóa vĩnh viễn?' : 'Delete permanently?',
+      isVi ? `Tệp “${file.name}” sẽ không thể khôi phục.` : `“${file.name}” cannot be restored.`,
+      [
+        { text: t.cancel, style: 'cancel' },
+        {
+          text: isVi ? 'Xóa vĩnh viễn' : 'Delete permanently',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const storage = await permanentlyDeleteFile(file.id);
+              setTrashFiles((current) => current.filter((item) => item.id !== file.id));
+              setUsedStorageBytes(storage.used_storage_bytes);
+            } catch (error) {
+              Alert.alert(isVi ? 'Không thể xóa tệp' : 'Unable to delete file', error instanceof Error ? error.message : String(error));
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const handleUpload = async () => {
     if (isDocumentPickerOpen) return;
@@ -525,11 +645,11 @@ export function UserDashboard({
       const uploaded = await uploadFile(picked.assets[0]);
       if (uploaded) {
         const type = fileTypeFromMime(uploaded.file);
-        setFiles((current) => [{ id: uploaded.file.id, name: uploaded.file.name, fileType: type, sizeBytes: uploaded.file.size_bytes, updatedAt: isVi ? 'Vừa xong' : 'Just now', modifiedBy: 'Bạn', isStarred: false }, ...current]);
+        setFiles((current) => [{ id: uploaded.file.id, name: uploaded.file.name, fileType: type, sizeBytes: uploaded.file.size_bytes, updatedAt: isVi ? 'Vừa xong' : 'Just now', modifiedBy: 'Bạn', isStarred: uploaded.file.is_starred }, ...current]);
         setUsedStorageBytes(uploaded.storage.used_storage_bytes);
       } else {
         const [remoteFiles, storage] = await Promise.all([fetchFiles(), fetchStorageUsage()]);
-        setFiles(remoteFiles.map((file) => ({ id: file.id, name: file.name, fileType: fileTypeFromMime(file), sizeBytes: file.size_bytes, updatedAt: new Date(file.created_at).toLocaleDateString(isVi ? 'vi-VN' : 'en-US'), modifiedBy: 'Bạn', isStarred: false })));
+        setFiles(remoteFiles.map(toDriveFile));
         setUsedStorageBytes(storage.used_storage_bytes);
       }
       Alert.alert(isVi ? 'Thành công' : 'Success', t.uploadSuccess);
@@ -551,9 +671,8 @@ export function UserDashboard({
         style: 'destructive',
         onPress: async () => {
           try {
-            const storage = await deleteFile(file.id);
+            await deleteFile(file.id);
             setFiles((prev) => prev.filter((f) => f.id !== file.id));
-            setUsedStorageBytes(storage.used_storage_bytes);
           } catch (error) {
             Alert.alert(isVi ? 'Không thể xóa tệp' : 'Unable to delete file', error instanceof Error ? error.message : String(error));
           }
@@ -598,6 +717,15 @@ export function UserDashboard({
     }
   };
 
+  const handleShowFileDetails = async (file: DriveFile) => {
+    setFileActionSheetOpen(false);
+    try {
+      setFileDetails(await fetchFileDetails(file.id));
+    } catch (error) {
+      Alert.alert(isVi ? 'Không thể xem thông tin tệp' : 'Unable to load file details', error instanceof Error ? error.message : String(error));
+    }
+  };
+
   // Filtered files
   const displayedFiles = useMemo(() => {
     let list: DriveFile[] = [];
@@ -623,6 +751,24 @@ export function UserDashboard({
     }
     return list;
   }, [activeTab, files, sharedFiles, typeFilter, searchQuery, sortOrder]);
+
+  const visibleFolders = useMemo(
+    () => folders.filter((folder) => folder.parentId === currentFolderId),
+    [currentFolderId, folders],
+  );
+
+  const folderBreadcrumbs = useMemo(() => {
+    const byId = new Map(folders.map((folder) => [folder.id, folder]));
+    const path: DriveFolder[] = [];
+    const visited = new Set<string>();
+    let folder = currentFolderId ? byId.get(currentFolderId) : undefined;
+    while (folder && !visited.has(folder.id)) {
+      visited.add(folder.id);
+      path.unshift(folder);
+      folder = folder.parentId ? byId.get(folder.parentId) : undefined;
+    }
+    return path;
+  }, [currentFolderId, folders]);
 
   // Theme Colors
   const bgMain = isDark ? '#0F172A' : '#FFFFFF';
@@ -880,10 +1026,32 @@ export function UserDashboard({
               </Pressable>
             </View>
 
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ alignItems: 'center', paddingBottom: 10 }}>
+              <Pressable onPress={() => setCurrentFolderId(null)}>
+                <Text style={{ color: currentFolderId === null ? '#2563EB' : textMuted, fontWeight: '600' }}>
+                  {isVi ? 'Thư mục của tôi' : 'My files'}
+                </Text>
+              </Pressable>
+              {folderBreadcrumbs.map((folder) => (
+                <View key={folder.id} style={{ alignItems: 'center', flexDirection: 'row' }}>
+                  <Ionicons name="chevron-forward" size={15} color={textMuted} style={{ marginHorizontal: 4 }} />
+                  <Pressable onPress={() => setCurrentFolderId(folder.id)}>
+                    <Text style={{ color: folder.id === currentFolderId ? '#2563EB' : textMuted, fontWeight: '600' }}>
+                      {folder.name}
+                    </Text>
+                  </Pressable>
+                </View>
+              ))}
+            </ScrollView>
+
             <View style={styles.foldersGrid}>
-              {folders.map((folder) => (
-                <View
+              {visibleFolders.map((folder) => (
+                <Pressable
                   key={folder.id}
+                  onPress={() => setCurrentFolderId(folder.id)}
                   style={[styles.folderCard, { backgroundColor: surfaceContainer }]}>
                   <Ionicons name="folder" size={24} color="#3B82F6" style={{ marginRight: 10 }} />
                   <View style={{ flex: 1 }}>
@@ -892,11 +1060,14 @@ export function UserDashboard({
                     </Text>
                   </View>
                   <Pressable
-                    onPress={() => handleDeleteFolder(folder)}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      handleDeleteFolder(folder);
+                    }}
                     hitSlop={8}>
                     <Ionicons name="trash-outline" size={18} color="#DC2626" />
                   </Pressable>
-                </View>
+                </Pressable>
               ))}
             </View>
           </View>
@@ -954,10 +1125,7 @@ export function UserDashboard({
                 return (
                   <Pressable
                     key={file.id}
-                    onPress={() => {
-                      setSelectedFile(file);
-                      setFileActionSheetOpen(true);
-                    }}
+                    onPress={() => void handleViewFile(file)}
                     style={[styles.fileListItem, { borderBottomColor: dividerColor }]}>
                     <View style={styles.fileListIconWrap}>
                       <Ionicons name={badge.name} size={24} color={badge.color} />
@@ -979,7 +1147,8 @@ export function UserDashboard({
                     )}
 
                     <Pressable
-                      onPress={() => {
+                      onPress={(event) => {
+                        event.stopPropagation();
                         setSelectedFile(file);
                         setFileActionSheetOpen(true);
                       }}
@@ -998,10 +1167,7 @@ export function UserDashboard({
                 return (
                   <Pressable
                     key={file.id}
-                    onPress={() => {
-                      setSelectedFile(file);
-                      setFileActionSheetOpen(true);
-                    }}
+                    onPress={() => void handleViewFile(file)}
                     style={[styles.fileGridCard, { backgroundColor: surfaceContainer }]}>
                     <View style={styles.fileGridPreview}>
                       <Ionicons name={badge.name} size={36} color={badge.color} />
@@ -1016,7 +1182,8 @@ export function UserDashboard({
                           {file.updatedAt}
                         </Text>
                         <Pressable
-                          onPress={() => {
+                          onPress={(event) => {
+                            event.stopPropagation();
                             setSelectedFile(file);
                             setFileActionSheetOpen(true);
                           }}
@@ -1352,10 +1519,7 @@ export function UserDashboard({
               </Pressable>
 
               <Pressable
-                onPress={() => {
-                  setDrawerOpen(false);
-                  Alert.alert(t.trash, isVi ? 'Thùng rác trống.' : 'Trash is empty.');
-                }}
+                onPress={() => void openTrash()}
                 style={styles.drawerItem}>
                 <Ionicons name="trash-outline" size={22} color={textMuted} />
                 <Text style={[styles.drawerItemText, { color: textColor }]}>{t.trash}</Text>
@@ -1421,6 +1585,35 @@ export function UserDashboard({
         </Pressable>
       </Modal>
 
+      <Modal visible={trashOpen} animationType="slide" onRequestClose={() => setTrashOpen(false)}>
+        <View style={[styles.trashScreen, { backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }]}>
+          <View style={[styles.viewerHeader, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF', borderBottomColor: dividerColor, height: insets.top + 56, paddingTop: insets.top }]}>
+            <Text style={[styles.dialogTitle, { color: textColor, marginBottom: 0, flex: 1 }]}>{t.trash}</Text>
+            {trashFiles.length > 0 && <Pressable onPress={handleEmptyTrash} hitSlop={12} style={styles.emptyTrashButton}><Text style={styles.emptyTrashText}>{isVi ? 'Xóa tất cả' : 'Empty'}</Text></Pressable>}
+            <Pressable onPress={() => setTrashOpen(false)} hitSlop={12}><Ionicons name="close" size={26} color={textColor} /></Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.trashContent}>
+            {trashFiles.length === 0 ? (
+              <View style={styles.emptyStateContainer}>
+                <Ionicons name="trash-outline" size={42} color={textMuted} />
+                <Text style={[styles.emptyStateTitle, { color: textColor }]}>{isVi ? 'Thùng rác trống' : 'Trash is empty'}</Text>
+              </View>
+            ) : trashFiles.map((file) => {
+              const badge = getFileBadge(file.fileType);
+              return <View key={file.id} style={[styles.trashFileRow, { borderBottomColor: dividerColor }]}>
+                <Ionicons name={badge.name} size={26} color={badge.color} />
+                <View style={styles.fileListInfo}>
+                  <Text style={[styles.fileListTitle, { color: textColor }]} numberOfLines={1}>{file.name}</Text>
+                  <Text style={[styles.fileListMeta, { color: textMuted }]}>{formatBytes(file.sizeBytes)}</Text>
+                </View>
+                <Pressable onPress={() => handleRestoreFile(file)} style={styles.trashAction}><Ionicons name="arrow-undo-outline" size={22} color="#2563EB" /></Pressable>
+                <Pressable onPress={() => handlePermanentlyDeleteFile(file)} style={styles.trashAction}><Ionicons name="trash-outline" size={22} color="#DC2626" /></Pressable>
+              </View>;
+            })}
+          </ScrollView>
+        </View>
+      </Modal>
+
       {/* 9. MODAL: FILE 3-DOT ACTIONS SHEET */}
       <Modal
         visible={fileActionSheetOpen}
@@ -1467,7 +1660,7 @@ export function UserDashboard({
 
             <Pressable
               onPress={() => {
-                if (selectedFile) toggleStar(selectedFile.id);
+                if (selectedFile) void toggleStar(selectedFile.id);
                 setFileActionSheetOpen(false);
               }}
               style={styles.actionSheetItem}>
@@ -1504,6 +1697,13 @@ export function UserDashboard({
             </Pressable>
 
             <Pressable
+              onPress={() => { if (selectedFile) void handleShowFileDetails(selectedFile); }}
+              style={styles.actionSheetItem}>
+              <Ionicons name="information-circle-outline" size={20} color={textColor} />
+              <Text style={[styles.actionSheetItemText, { color: textColor }]}>{t.details}</Text>
+            </Pressable>
+
+            <Pressable
               onPress={() => {
                 if (selectedFile) handleDeleteFile(selectedFile);
               }}
@@ -1513,6 +1713,35 @@ export function UserDashboard({
             </Pressable>
           </View>
         </Pressable>
+      </Modal>
+
+      <Modal visible={fileDetails !== null} animationType="slide" onRequestClose={() => setFileDetails(null)}>
+        <View style={[styles.fileInfoScreen, { backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }]}>
+          <View style={[styles.viewerHeader, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF', borderBottomColor: dividerColor, height: insets.top + 56, paddingTop: insets.top }]}>
+            <Text style={[styles.dialogTitle, { color: textColor, marginBottom: 0, flex: 1 }]}>{t.details}</Text>
+            <Pressable onPress={() => setFileDetails(null)} hitSlop={12}><Ionicons name="close" size={26} color={textColor} /></Pressable>
+          </View>
+          {fileDetails && (() => {
+            const extension = splitFileName(fileDetails.name).extension.replace('.', '').toUpperCase() || 'FILE';
+            const badge = getFileBadge(fileTypeFromMime(fileDetails));
+            const createdAt = new Date(fileDetails.created_at).toLocaleString(isVi ? 'vi-VN' : 'en-US');
+            return <ScrollView contentContainerStyle={styles.fileInfoContent}>
+              <View style={styles.fileInfoTitleRow}>
+                <View style={[styles.fileInfoIcon, { backgroundColor: `${badge.color}1A` }]}><Ionicons name={badge.name} size={30} color={badge.color} /></View>
+                <Text style={[styles.fileInfoName, { color: textColor }]}>{fileDetails.name}</Text>
+              </View>
+              <View style={styles.fileInfoGrid}>
+                <View style={styles.fileInfoGridItem}><Text style={[styles.fileInfoLabel, { color: textMuted }]}>{isVi ? 'Loại' : 'Type'}</Text><Text style={[styles.fileInfoValue, { color: textColor }]}>{extension}</Text></View>
+                <View style={styles.fileInfoGridItem}><Text style={[styles.fileInfoLabel, { color: textMuted }]}>{isVi ? 'Vị trí' : 'Location'}</Text><Text style={[styles.fileInfoValue, { color: textColor }]}>{isVi ? 'Tệp của tôi' : 'My Files'}</Text></View>
+                <View style={styles.fileInfoGridItem}><Text style={[styles.fileInfoLabel, { color: textMuted }]}>{isVi ? 'Kích thước' : 'Size'}</Text><Text style={[styles.fileInfoValue, { color: textColor }]}>{formatBytes(fileDetails.size_bytes)}</Text></View>
+              </View>
+              <View style={[styles.fileInfoDivider, { backgroundColor: dividerColor }]} />
+              <Text style={[styles.fileInfoLabel, { color: textMuted }]}>{isVi ? 'Chủ sở hữu' : 'Owner'}</Text><Text style={[styles.fileInfoValue, { color: textColor }]}>{session.user.display_name}</Text>
+              <View style={styles.fileInfoBlock}><Text style={[styles.fileInfoLabel, { color: textMuted }]}>{isVi ? 'Đã tải lên' : 'Uploaded'}</Text><Text style={[styles.fileInfoValue, { color: textColor }]}>{createdAt}</Text></View>
+              <View style={styles.fileInfoBlock}><Text style={[styles.fileInfoLabel, { color: textMuted }]}>{isVi ? 'Bộ nhớ chiếm dụng' : 'Storage used'}</Text><Text style={[styles.fileInfoValue, { color: textColor }]}>{formatBytes(fileDetails.size_bytes)}</Text></View>
+            </ScrollView>;
+          })()}
+        </View>
       </Modal>
 
       {/* 10. MODAL: RENAME FILE DIALOG */}
@@ -2230,6 +2459,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  fileInfoScreen: { flex: 1 },
+  fileInfoContent: { padding: 24, paddingBottom: 48 },
+  fileInfoTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 28 },
+  fileInfoIcon: { width: 52, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  fileInfoName: { flex: 1, fontSize: 21, fontWeight: '600' },
+  fileInfoGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 24 },
+  fileInfoGridItem: { width: '50%' },
+  fileInfoLabel: { fontSize: 14, marginBottom: 7 },
+  fileInfoValue: { fontSize: 19, fontWeight: '500' },
+  fileInfoDivider: { height: StyleSheet.hairlineWidth, marginVertical: 28 },
+  fileInfoBlock: { marginTop: 26 },
+  trashScreen: { flex: 1 },
+  trashContent: { paddingHorizontal: 20, paddingBottom: 32 },
+  trashFileRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  trashAction: { padding: 6 },
+  emptyTrashButton: { paddingHorizontal: 8, paddingVertical: 6, marginRight: 8 },
+  emptyTrashText: { color: '#DC2626', fontSize: 14, fontWeight: '600' },
   renameFileInputRow: {
     height: 48,
     flexDirection: 'row',

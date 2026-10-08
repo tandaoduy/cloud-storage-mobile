@@ -19,8 +19,11 @@ async def get_current_user(
     try:
         payload = jwt.decode(credentials.credentials, get_settings().secret_key, algorithms=["HS256"])
         user_id = uuid.UUID(payload["sub"])
-    except (jwt.InvalidTokenError, KeyError, ValueError):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Access token không hợp lệ.")
+    except (jwt.InvalidTokenError, KeyError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Access token không hợp lệ.",
+        ) from exc
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Người dùng không tồn tại.")

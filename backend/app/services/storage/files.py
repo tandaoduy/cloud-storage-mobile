@@ -1,5 +1,6 @@
 """Local disk storage service with transactional quota accounting."""
 
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -28,6 +29,8 @@ class FileService:
             "name": item.name,
             "mime_type": item.mime_type,
             "size_bytes": item.size_bytes,
+            "is_starred": item.is_starred,
+            "deleted_at": item.deleted_at,
             "created_at": item.created_at,
         }
 
@@ -44,11 +47,21 @@ class FileService:
         """Retrieve serialized metadata for a user's files."""
         return [self.serialize(item) for item in await self.repository.list_for_user(db, user_id)]
 
+    async def list_trashed_files(self, db: AsyncSession, user_id: UUID) -> list[dict]:
+        """Return files that were moved to the current user's Trash."""
+        return [self.serialize(item) for item in await self.repository.list_trashed_for_user(db, user_id)]
+
     async def get_file(self, db: AsyncSession, file_id: UUID, user_id: UUID) -> StoredFile:
         """Retrieve an owned file or raise a not-found error."""
         item = await self.repository.get_for_user(db, file_id, user_id)
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy tệp.")
+        return item
+
+    async def get_trashed_file(self, db: AsyncSession, file_id: UUID, user_id: UUID) -> StoredFile:
+        item = await self.repository.get_trashed_for_user(db, file_id, user_id)
+        if not item:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy tệp trong Thùng rác.")
         return item
 
     async def upload(
@@ -130,9 +143,25 @@ class FileService:
             if temporary_path.exists():
                 temporary_path.unlink()
 
-    async def delete(self, db: AsyncSession, user: User, file_id: UUID) -> dict:
-        """Delete metadata and reduce storage usage after a successful commit."""
+    async def move_to_trash(self, db: AsyncSession, user: User, file_id: UUID) -> dict:
+        """Soft-delete a file while preserving its bytes and quota usage."""
         item = await self.get_file(db, file_id, user.id)
+        item.deleted_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(item)
+        return self.serialize(item)
+
+    async def restore(self, db: AsyncSession, user: User, file_id: UUID) -> dict:
+        """Restore a file from Trash without changing its storage usage."""
+        item = await self.get_trashed_file(db, file_id, user.id)
+        item.deleted_at = None
+        await db.commit()
+        await db.refresh(item)
+        return self.serialize(item)
+
+    async def permanently_delete(self, db: AsyncSession, user: User, file_id: UUID) -> dict:
+        """Permanently delete a trashed file and then release its quota."""
+        item = await self.get_trashed_file(db, file_id, user.id)
         locked_user = await db.scalar(
             select(User).where(User.id == user.id).with_for_update()
         )
@@ -148,6 +177,29 @@ class FileService:
         await db.refresh(locked_user)
         # A failed unlink only leaves a safe orphan; the database stays authoritative.
         path.unlink(missing_ok=True)
+        return {"storage": self.storage_usage(locked_user)}
+
+    async def empty_trash(self, db: AsyncSession, user: User) -> dict:
+        """Permanently delete every trashed file owned by the current user."""
+        items = await self.repository.list_trashed_for_user(db, user.id)
+        locked_user = await db.scalar(
+            select(User).where(User.id == user.id).with_for_update()
+        )
+        if not locked_user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Người dùng không tồn tại.",
+            )
+
+        paths = [Path(item.path) for item in items]
+        released_bytes = sum(item.size_bytes for item in items)
+        for item in items:
+            await db.delete(item)
+        locked_user.used_storage_bytes = max(0, locked_user.used_storage_bytes - released_bytes)
+        await db.commit()
+        await db.refresh(locked_user)
+        for path in paths:
+            path.unlink(missing_ok=True)
         return {"storage": self.storage_usage(locked_user)}
 
     async def rename(self, db: AsyncSession, user: User, file_id: UUID, name: str) -> dict:
@@ -177,6 +229,16 @@ class FileService:
                 )
 
         item.name = sanitized_name
+        await db.commit()
+        await db.refresh(item)
+        return self.serialize(item)
+
+    async def set_starred(
+        self, db: AsyncSession, user: User, file_id: UUID, is_starred: bool
+    ) -> dict:
+        """Persist a file's Starred state for the current user."""
+        item = await self.get_file(db, file_id, user.id)
+        item.is_starred = is_starred
         await db.commit()
         await db.refresh(item)
         return self.serialize(item)

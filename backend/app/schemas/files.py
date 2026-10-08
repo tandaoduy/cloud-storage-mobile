@@ -23,6 +23,8 @@ class FileMetadata(BaseModel):
     name: str
     mime_type: str
     size_bytes: int
+    is_starred: bool
+    deleted_at: datetime | None
     created_at: datetime
 
 
@@ -30,6 +32,12 @@ class RenameFileRequest(BaseModel):
     """Payload for changing the display name of an owned file."""
 
     name: str = Field(min_length=1, max_length=255)
+
+
+class StarFileRequest(BaseModel):
+    """Payload for changing whether a file appears in Starred."""
+
+    is_starred: bool
 
 
 class StorageUsage(BaseModel):

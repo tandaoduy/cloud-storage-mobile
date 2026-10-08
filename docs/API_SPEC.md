@@ -184,30 +184,34 @@ Các API thư mục hiện yêu cầu access token và chỉ thao tác trên th�
 
 ### `GET /folders`
 
-Liệt kê thư mục của tài khoản hiện tại, sắp xếp thư mục cập nhật gần nhất lên đầu.
+Liệt kê toàn bộ thư mục của tài khoản hiện tại, sắp xếp thư mục cập nhật gần nhất lên đầu. Mỗi thư mục có `parent_id`; giá trị `null` là thư mục gốc. Client có thể dựng cây thư mục từ trường này.
+
+Gửi `parent_id=<uuid>` để chỉ lấy các thư mục con trực tiếp của một thư mục. Nếu thư mục cha không thuộc tài khoản hiện tại, API trả `404`.
 
 **Response 200**
 
 ```json
-{ "data": [{ "id": "uuid", "name": "Ảnh du lịch", "created_at": "2026-10-01T00:00:00+00:00", "updated_at": "2026-10-01T00:00:00+00:00" }] }
+{ "data": [{ "id": "uuid", "name": "Ảnh du lịch", "parent_id": null, "created_at": "2026-10-01T00:00:00+00:00", "updated_at": "2026-10-01T00:00:00+00:00" }] }
 ```
 
 ### `POST /folders`
 
 ```json
-{ "name": "Ảnh du lịch" }
+{ "name": "Ảnh du lịch", "parent_id": "uuid-thu-muc-cha-hoac-null" }
 ```
+
+`parent_id` là tùy chọn. Chỉ được tạo trùng tên ở các thư mục cha khác nhau; hai thư mục cùng cấp không được trùng tên.
 
 **Response 201**
 
 ```json
-{ "data": { "id": "uuid", "name": "Ảnh du lịch", "created_at": "2026-10-01T00:00:00+00:00", "updated_at": "2026-10-01T00:00:00+00:00" } }
+{ "data": { "id": "uuid", "name": "Ảnh du lịch", "parent_id": "uuid-thu-muc-cha-hoac-null", "created_at": "2026-10-01T00:00:00+00:00", "updated_at": "2026-10-01T00:00:00+00:00" } }
 ```
 
 
 ### `DELETE /folders/{folder_id}`
 
-Xóa vĩnh viễn thư mục của tài khoản hiện tại. Response `204 No Content`; trả `404` nếu thư mục không tồn tại hoặc không thuộc tài khoản.
+Xóa vĩnh viễn thư mục của tài khoản hiện tại cùng toàn bộ thư mục con. Response `204 No Content`; trả `404` nếu thư mục không tồn tại hoặc không thuộc tài khoản.
 
 ## 6. Files
 

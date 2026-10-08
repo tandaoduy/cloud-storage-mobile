@@ -23,9 +23,9 @@ export type Session = { access_token: string; refresh_token: string; expires_in:
 type AuthResponse = { data: Session };
 type ProfileResponse = { data: User };
 type StorageResponse = { data: { quota_bytes: number; used_storage_bytes: number; available_bytes: number } };
-export type RemoteFolder = { id: string; name: string; created_at: string; updated_at: string };
+export type RemoteFolder = { id: string; name: string; parent_id: string | null; created_at: string; updated_at: string };
 export type StorageUsage = { quota_bytes: number; used_storage_bytes: number; available_bytes: number };
-export type RemoteFile = { id: string; name: string; mime_type: string; size_bytes: number; created_at: string };
+export type RemoteFile = { id: string; name: string; mime_type: string; size_bytes: number; is_starred: boolean; created_at: string };
 type FoldersResponse = { data: RemoteFolder[] };
 type FolderResponse = { data: RemoteFolder };
 type FilesResponse = { data: RemoteFile[] };
@@ -34,8 +34,11 @@ type UploadResult = { file: RemoteFile; storage: StorageUsage };
 // deployed backend versions during a rolling update.
 type UploadFileResponse = { data: UploadResult } | UploadResult;
 type DeleteFileResponse = { data: { storage: StorageUsage } };
+type MoveToTrashResponse = { data: RemoteFile };
 type RenameFileResponse = { data: RemoteFile };
+type StarFileResponse = { data: RemoteFile };
 type FileViewTokenResponse = { data: { token: string } };
+type FileDetailsResponse = { data: RemoteFile };
 
 
 export async function login(email: string, password: string): Promise<Session> {
@@ -182,11 +185,11 @@ export async function fetchFolders(): Promise<RemoteFolder[]> {
   return response.data;
 }
 
-export async function createFolder(name: string): Promise<RemoteFolder> {
+export async function createFolder(name: string, parentId: string | null = null): Promise<RemoteFolder> {
   const response = await authenticatedRequest<FolderResponse>('/folders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, parent_id: parentId }),
   });
   return response.data;
 }
@@ -214,8 +217,26 @@ export async function uploadFile(asset: { uri: string; name: string }): Promise<
   return result?.file && result.storage ? result : null;
 }
 
-export async function deleteFile(id: string): Promise<StorageUsage> {
-  return (await authenticatedRequest<DeleteFileResponse>(`/files/${id}`, { method: 'DELETE' })).data.storage;
+/** Moves a file to Trash. It stays recoverable and continues using storage. */
+export async function deleteFile(id: string): Promise<RemoteFile> {
+  return (await authenticatedRequest<MoveToTrashResponse>(`/files/${id}`, { method: 'DELETE' })).data;
+}
+
+export async function fetchTrashFiles(): Promise<RemoteFile[]> {
+  return (await authenticatedRequest<FilesResponse>('/files/trash', { method: 'GET' })).data;
+}
+
+export async function restoreFile(id: string): Promise<RemoteFile> {
+  return (await authenticatedRequest<{ data: RemoteFile }>(`/files/${id}/restore`, { method: 'POST' })).data;
+}
+
+/** Permanently removes a file already placed in Trash and releases its storage. */
+export async function permanentlyDeleteFile(id: string): Promise<StorageUsage> {
+  return (await authenticatedRequest<DeleteFileResponse>(`/files/${id}/permanent`, { method: 'DELETE' })).data.storage;
+}
+
+export async function emptyTrash(): Promise<StorageUsage> {
+  return (await authenticatedRequest<DeleteFileResponse>('/files/trash', { method: 'DELETE' })).data.storage;
 }
 
 export async function renameFile(id: string, name: string): Promise<RemoteFile> {
@@ -223,6 +244,14 @@ export async function renameFile(id: string, name: string): Promise<RemoteFile> 
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
+  })).data;
+}
+
+export async function setFileStarred(id: string, isStarred: boolean): Promise<RemoteFile> {
+  return (await authenticatedRequest<StarFileResponse>(`/files/${id}/star`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_starred: isStarred }),
   })).data;
 }
 
@@ -240,6 +269,11 @@ export async function downloadFileForViewing(id: string, name: string): Promise<
 export async function getFileViewUrl(id: string): Promise<string> {
   const response = await authenticatedRequest<FileViewTokenResponse>(`/files/${id}/view-token`, { method: 'POST' });
   return `${API_URL}/files/${id}/view?token=${encodeURIComponent(response.data.token)}`;
+}
+
+
+export async function fetchFileDetails(id: string): Promise<RemoteFile> {
+  return (await authenticatedRequest<FileDetailsResponse>(`/files/${id}`, { method: 'GET' })).data;
 }
 
 export async function uploadAvatar(asset: { uri: string; fileName?: string | null; mimeType?: string | null }): Promise<User> {

@@ -1,8 +1,11 @@
+from uuid import UUID
+
 from pydantic import BaseModel, Field, field_validator
 
 
 class CreateFolderRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+    parent_id: UUID | None = None
 
     @field_validator("name")
     @classmethod

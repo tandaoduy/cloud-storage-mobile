@@ -1,0 +1,14 @@
+[MAIN]
+py-version=3.14
+
+[MESSAGES CONTROL]
+# This API uses Pydantic models and SQLAlchemy declarative models, whose fields
+# are intentionally declarative rather than conventional public methods.
+disable=
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    too-few-public-methods,
+    line-too-long,
+    not-callable,
+    too-many-locals

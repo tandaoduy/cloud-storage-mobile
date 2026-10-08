@@ -12,4 +12,10 @@ Mobile mặc định dùng `http://127.0.0.1:8000/api/v1`, đúng cho iOS Simula
 
 Khi API chạy, migration `001_users_auth` tự tạo bảng `users` và `refresh_tokens`. Mở app trong iOS Simulator để đăng ký hoặc đăng nhập; token phiên được lưu bằng Expo SecureStore.
 
+## Lưu dữ liệu khi khởi động lại Docker
+
+PostgreSQL và các tệp đã tải lên được lưu trong `./.data/` trên máy chủ, không nằm trong image/container. Vì vậy dữ liệu vẫn còn sau `docker compose restart`, `docker compose up --build`, `docker compose down`, và cả `docker compose down -v`.
+
+Không xóa thư mục `./.data/` nếu muốn giữ tài khoản, folder và file đã tạo. Thư mục này đã được bỏ qua bởi Git để không bị commit. Docker Desktop **Reset to factory defaults** cũng không xóa thư mục này, nhưng bạn vẫn nên sao lưu nó định kỳ.
+
 Trước khi deploy, đặt `SECRET_KEY` ngẫu nhiên, riêng tư trong môi trường backend; không dùng giá trị development mặc định.

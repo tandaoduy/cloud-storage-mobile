@@ -36,6 +36,9 @@ yarn-error.*
 # local env files
 .env*.local
 
+# Persistent local Docker data (PostgreSQL and uploaded files)
+/.data/
+
 # typescript
 *.tsbuildinfo
 
